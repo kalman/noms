@@ -66,6 +66,7 @@ func (s *testSuite) TestImportFromFile() {
 
 	f, err := ioutil.TempFile("", "TestImportFromFile")
 	assert.NoError(err)
+	defer os.Remove(f.Name())
 
 	f.Write([]byte("abcdef"))
 	f.Close()
