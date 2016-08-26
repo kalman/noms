@@ -44,7 +44,7 @@ func main() {
 	dateFlag := flag.String("date", "", fmt.Sprintf(`date of commit in ISO 8601 format ("%s"). By default, the current date is used.`, dateFormat))
 	noProgress := flag.Bool("no-progress", false, "prevents progress from being output if true")
 	destType := flag.String("dest-type", "list", "the destination type to import to. can be 'list' or 'map:<pk>', where <pk> is the index position (0-based) of the column that is a the unique identifier for the column")
-	skipRecords := flag.Uint("skip-records", 0, "number of records to skip at beginning of file")
+	skipRecords := flag.Int("skip-records", 0, "number of records to skip at beginning of file")
 
 	spec.RegisterDatabaseFlags(flag.CommandLine)
 	profile.RegisterProfileFlags(flag.CommandLine)
@@ -134,11 +134,11 @@ func main() {
 	}
 
 	cr := csv.NewCSVReader(r, comma)
-	csv.SkipRecords(cr, *skipRecords)
+	cr.SkipRecords(*skipRecords)
 
 	var headers []string
 	if *header == "" {
-		headers, err = cr.Read()
+		headers, err = cr.ReadFields()
 		d.PanicIfError(err)
 	} else {
 		headers = strings.Split(*header, string(comma))

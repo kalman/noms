@@ -5,13 +5,13 @@
 package csv
 
 import (
-	"encoding/csv"
 	"fmt"
 	"io"
 	"sort"
 	"strconv"
 
 	"github.com/attic-labs/noms/go/d"
+	"github.com/attic-labs/noms/go/lang/encoding/csv"
 	"github.com/attic-labs/noms/go/types"
 )
 
@@ -92,7 +92,7 @@ func ReadToList(r *csv.Reader, structName string, headers []string, kinds KindSl
 	listChan := types.NewStreamingList(vrw, valueChan)
 
 	for {
-		row, err := r.Read()
+		record, fields, err := r.Read()
 		if err == io.EOF {
 			close(valueChan)
 			break
@@ -100,8 +100,8 @@ func ReadToList(r *csv.Reader, structName string, headers []string, kinds KindSl
 			panic(err)
 		}
 
-		fields := readFieldsFromRow(row, headers, fieldOrder, kindMap)
-		valueChan <- types.NewStructWithType(t, fields)
+		fieldValues := readFieldsFromRow(record, fields, headers, fieldOrder, kindMap)
+		valueChan <- types.NewStructWithType(t, fieldValues)
 	}
 
 	return <-listChan, t
@@ -134,19 +134,21 @@ func getPkIndices(strPks []string, headers []string) []int {
 	return result
 }
 
-func readFieldsFromRow(row []string, headers []string, fieldOrder []int, kindMap []types.NomsKind) types.ValueSlice {
-	fields := make(types.ValueSlice, len(headers))
-	for i, v := range row {
-		if i < len(headers) {
-			fieldOrigIndex := fieldOrder[i]
-			val, err := StringToValue(v, kindMap[fieldOrigIndex])
-			if err != nil {
-				d.Chk.Fail(fmt.Sprintf("Error parsing value for column '%s': %s", headers[i], err))
-			}
-			fields[fieldOrigIndex] = val
+func readFieldsFromRow(record []byte, fields []csv.FieldRange, headers []string, fieldOrder []int, kindMap []types.NomsKind) types.ValueSlice {
+	fieldValues := make(types.ValueSlice, len(headers))
+	for i, fr := range fields {
+		if i == len(headers) {
+			break
 		}
+		fieldOrigIndex := fieldOrder[i]
+		// TODO: Pass byte slice into StringToValue.
+		val, err := StringToValue(string(fr.Slice(record)), kindMap[fieldOrigIndex])
+		if err != nil {
+			d.Chk.Fail(fmt.Sprintf("Error parsing value for column '%s': %s", headers[i], err))
+		}
+		fieldValues[fieldOrigIndex] = val
 	}
-	return fields
+	return fieldValues
 }
 
 // ReadToMap takes a CSV reader and reads data into a typed Map of structs. Each row gets read into a struct named structName, described by headers. If the original data contained headers it is expected that the input reader has already read those and are pointing at the first data row.
@@ -162,16 +164,16 @@ func ReadToMap(r *csv.Reader, structName string, headersRaw []string, primaryKey
 	kvChan := make(chan types.Value, 128)
 	mapChan := types.NewStreamingMap(vrw, kvChan)
 	for {
-		row, err := r.Read()
+		record, fields, err := r.Read()
 		if err == io.EOF {
 			break
 		} else if err != nil {
 			panic(err)
 		}
 
-		fields := readFieldsFromRow(row, headersRaw, fieldOrder, kindMap)
-		kvChan <- fields[fieldOrder[pkIndices[0]]]
-		kvChan <- types.NewStructWithType(t, fields)
+		fieldValues := readFieldsFromRow(record, fields, headersRaw, fieldOrder, kindMap)
+		kvChan <- fieldValues[fieldOrder[pkIndices[0]]]
+		kvChan <- types.NewStructWithType(t, fieldValues)
 	}
 	close(kvChan)
 	return <-mapChan
@@ -202,21 +204,21 @@ func goMaptoNomsMap(gm map[types.Value]mapOrStruct, vrw types.ValueReadWriter) t
 func readToNestedMap(r *csv.Reader, structName string, headersRaw []string, pkIndices []int, t *types.Type, fieldOrder []int, kindMap []types.NomsKind, vrw types.ValueReadWriter) types.Map {
 	goMap := make(map[types.Value]mapOrStruct)
 	for {
-		row, err := r.Read()
+		record, fields, err := r.Read()
 		if err == io.EOF {
 			break
 		} else if err != nil {
 			panic(err)
 		}
 
-		fields := readFieldsFromRow(row, headersRaw, fieldOrder, kindMap)
-		rowStruct := types.NewStructWithType(t, fields)
+		fieldValues := readFieldsFromRow(record, fields, headersRaw, fieldOrder, kindMap)
+		rowStruct := types.NewStructWithType(t, fieldValues)
 
 		// needed to allow recursive calls to encloseInMap
 		var encloseInMapFunc func(m map[types.Value]mapOrStruct, keyLevel int) map[types.Value]mapOrStruct
 		encloseInMapFunc = func(m map[types.Value]mapOrStruct, keyLevel int) map[types.Value]mapOrStruct {
 			fieldOrigIndex := fieldOrder[pkIndices[keyLevel]]
-			key := fields[fieldOrigIndex]
+			key := fieldValues[fieldOrigIndex]
 
 			// at end of our indices, set the final key to point to this row
 			if keyLevel == len(pkIndices)-1 {

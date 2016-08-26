@@ -68,6 +68,14 @@ type ParseError struct {
 	Err    error // The actual error
 }
 
+// FieldRange is a 2-element integer array representing the start and end of a field within a `[]byte`.
+type FieldRange []int
+
+// Slice returns a slice of `slice` clipped to this range.
+func (fr FieldRange) Slice(slice []byte) []byte {
+	return slice[fr[0]:fr[1]]
+}
+
 func (e *ParseError) Error() string {
 	return fmt.Sprintf("line %d, column %d: %s", e.Line, e.Column, e.Err)
 }
@@ -114,7 +122,7 @@ type Reader struct {
 	line   int
 	column int
 	r      *bufio.Reader
-	field  bytes.Buffer
+	record bytes.Buffer // TODO: Why does this need to be heap allocated?
 }
 
 // NewReader returns a new Reader that reads from r.
@@ -134,28 +142,46 @@ func (r *Reader) error(err error) error {
 	}
 }
 
-// Read reads one record from r. The record is a slice of strings with each
-// string representing one field.
-func (r *Reader) Read() (record []string, err error) {
+// Read reads one record from r. The record is returned as a single byte slice,
+// then a list of start/end indices of each field within that slice.
+func (r *Reader) Read() (record []byte, fields []FieldRange, err error) {
 	for {
-		record, err = r.parseRecord()
-		if record != nil {
+		fields, err = r.parseRecord()
+		if fields != nil {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
+	record = make([]byte, r.record.Len())
+	copy(record, r.record.Bytes())
+
 	if r.FieldsPerRecord > 0 {
-		if len(record) != r.FieldsPerRecord {
+		if len(fields) != r.FieldsPerRecord {
 			r.column = 0 // report at start of record
-			return record, r.error(ErrFieldCount)
+			return record, fields, r.error(ErrFieldCount)
 		}
 	} else if r.FieldsPerRecord == 0 {
-		r.FieldsPerRecord = len(record)
+		r.FieldsPerRecord = len(fields)
 	}
-	return record, nil
+	return record, fields, nil
+}
+
+// ReadFields is like Read, but returns results as a `[]string`.
+// This is often more convenient than Read, at the cost of an extra allocation (the string array).
+// NOTE: Don't use this for reading entire CSV files, use Read instead.
+func (r *Reader) ReadFields() ([]string, error) {
+	record, fields, err := r.Read()
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, len(fields))
+	for i, f := range fields {
+		res[i] = string(f.Slice(record))
+	}
+	return res, nil
 }
 
 // ReadAll reads all the remaining records from r.
@@ -163,9 +189,10 @@ func (r *Reader) Read() (record []string, err error) {
 // A successful call returns err == nil, not err == io.EOF. Because ReadAll is
 // defined to read until EOF, it does not treat end of file as an error to be
 // reported.
+// NOTE: Don't use this, use multiple calls to Read instead.
 func (r *Reader) ReadAll() (records [][]string, err error) {
 	for {
-		record, err := r.Read()
+		record, err := r.ReadFields()
 		if err == io.EOF {
 			return records, nil
 		}
@@ -174,6 +201,15 @@ func (r *Reader) ReadAll() (records [][]string, err error) {
 		}
 		records = append(records, record)
 	}
+}
+
+// SkipRecords moves the reader ahead `n` records.
+func (r *Reader) SkipRecords(n int) (err error) {
+	for i := 0; i < n && err == nil; i++ {
+		// TODO: There is some low hanging fruit to make this more efficient - for a start, there is no point reading into the buffer.
+		_, _, err = r.Read()
+	}
+	return
 }
 
 // readRune reads one rune from r, folding \r\n to \n and keeping track
@@ -212,10 +248,11 @@ func (r *Reader) skip(delim rune) error {
 }
 
 // parseRecord reads and parses a single csv record from r.
-func (r *Reader) parseRecord() (fields []string, err error) {
+func (r *Reader) parseRecord() (fields []FieldRange, err error) {
 	// Each record starts on a new line. We increment our line
 	// number (lines start at 1, not 0) and set column to -1
 	// so as we increment in readRune it points to the character we read.
+	r.record.Reset()
 	r.line++
 	r.column = -1
 
@@ -234,15 +271,34 @@ func (r *Reader) parseRecord() (fields []string, err error) {
 	r.r.UnreadRune()
 
 	// At this point we have at least one field.
+	needsComma := false
 	for {
+		// Add a separator to the record result, because it's useful for debugging.
+		//
+		// We could happily return for a CSV `abc,def` a record `abcdef` with
+		// offsets [(0, 3), (3, 6)], but instead we return `abc,def` with offsets
+		// [(0, 3), (4, 7)]. That way, fmt.Println(record) is easier to understand.
+		//
+		// This is more subtle when you consider a CSV like `ab""c,"def"`, where we
+		// collapse the `""` into a single quote, and drop the quotes around the
+		// `"def"`. In this case, the result will be a record `ab"c,def` with offsets
+		// [(0, 4), (5, 8)].
+		if needsComma {
+			r.record.WriteRune(r.Comma)
+			needsComma = false
+		}
+
+		start := r.record.Len()
+
 		haveField, delim, err := r.parseField()
 		if haveField {
 			// If FieldsPerRecord is greater than 0 we can assume the final
 			// length of fields to be equal to FieldsPerRecord.
 			if r.FieldsPerRecord > 0 && fields == nil {
-				fields = make([]string, 0, r.FieldsPerRecord)
+				fields = make([]FieldRange, 0, r.FieldsPerRecord)
 			}
-			fields = append(fields, r.field.String())
+			fields = append(fields, FieldRange{start, r.record.Len()})
+			needsComma = true
 		}
 		if delim == '\n' || err == io.EOF {
 			return fields, err
@@ -252,12 +308,10 @@ func (r *Reader) parseRecord() (fields []string, err error) {
 	}
 }
 
-// parseField parses the next field in the record. The read field is
-// located in r.field. Delim is the first character not part of the field
-// (r.Comma or '\n').
+// parseField parses the next field in the record by moving `r.column` forward
+// the size of the field, while appending to `r.record`.  Delim is the first
+// character not part of the field (r.Comma or '\n').
 func (r *Reader) parseField() (haveField bool, delim rune, err error) {
-	r.field.Reset()
-
 	r1, err := r.readRune()
 	for err == nil && r.TrimLeadingSpace && r1 != '\n' && unicode.IsSpace(r1) {
 		r1, err = r.readRune()
@@ -310,19 +364,19 @@ func (r *Reader) parseField() (haveField bool, delim rune, err error) {
 						return false, 0, r.error(ErrQuote)
 					}
 					// accept the bare quote
-					r.field.WriteRune('"')
+					r.record.WriteRune('"')
 				}
 			case '\n':
 				r.line++
 				r.column = -1
 			}
-			r.field.WriteRune(r1)
+			r.record.WriteRune(r1)
 		}
 
 	default:
 		// unquoted field
 		for {
-			r.field.WriteRune(r1)
+			r.record.WriteRune(r1)
 			r1, err = r.readRune()
 			if err != nil || r1 == r.Comma {
 				break

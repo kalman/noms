@@ -5,13 +5,13 @@
 package csv
 
 import (
-	"encoding/csv"
 	"fmt"
 	"io"
 	"math"
 	"strconv"
 
 	"github.com/attic-labs/noms/go/d"
+	"github.com/attic-labs/noms/go/lang/encoding/csv"
 	"github.com/attic-labs/noms/go/types"
 )
 
@@ -108,7 +108,7 @@ func (tc *typeCanFit) testBool(value string) {
 func GetSchema(r *csv.Reader, numSamples int, numFields int) KindSlice {
 	so := newSchemaOptions(numFields)
 	for i := 0; i < numSamples; i++ {
-		row, err := r.Read()
+		row, err := r.ReadFields()
 		if err == io.EOF {
 			break
 		}
@@ -185,7 +185,7 @@ func makeKeyString(row []string, indices []int, separator string) string {
 func FindPrimaryKeys(r *csv.Reader, numSamples, maxLenPrimaryKeyList, numFields int) [][]int {
 	dataToTest := make([][]string, 0, numSamples)
 	for i := int(0); i < numSamples; i++ {
-		row, err := r.Read()
+		row, err := r.ReadFields()
 		if err == io.EOF {
 			break
 		}

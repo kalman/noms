@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -43,7 +44,7 @@ func (s *perfSuite) SetupSuite() {
 	assert.NoError(s.T, err)
 }
 
-func (s *perfSuite) Test01ImportSfCrimeBlobFromTestdata() {
+func (s *perfSuite) _Test01ImportSfCrimeBlobFromTestdata() {
 	assert := s.NewAssert()
 
 	raw := s.openGlob(path.Join(s.Testdata, "sf-crime", "2016-07-28.*"))
@@ -57,7 +58,7 @@ func (s *perfSuite) Test01ImportSfCrimeBlobFromTestdata() {
 	assert.NoError(err)
 }
 
-func (s *perfSuite) Test02ImportSfCrimeCSVFromBlob() {
+func (s *perfSuite) _Test02ImportSfCrimeCSVFromBlob() {
 	assert := s.NewAssert()
 
 	blobSpec := fmt.Sprintf("%s::csv/raw.value", s.DatabaseSpec)
@@ -75,9 +76,14 @@ func (s *perfSuite) TestParseNyVehicleRegistrations() {
 	raw := s.openGlob(path.Join(s.Testdata, "ny-vehicle-registrations", "20150218.*"))
 	defer s.closeGlob(raw)
 
-	reader := csv.NewCSVReader(io.MultiReader(raw...), ',')
+	buf := bytes.Buffer{}
+	s.Pause(func() {
+		io.Copy(&buf, io.MultiReader(raw...))
+	})
+
+	reader := csv.NewCSVReader(&buf, ',')
 	for {
-		_, err := reader.Read()
+		_, _, err := reader.Read()
 		if err != nil {
 			assert.Equal(io.EOF, err)
 			break

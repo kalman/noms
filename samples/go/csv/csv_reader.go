@@ -6,8 +6,9 @@ package csv
 
 import (
 	"bufio"
-	"encoding/csv"
 	"io"
+
+	"github.com/attic-labs/noms/go/lang/encoding/csv"
 )
 
 var (
@@ -32,14 +33,10 @@ func (r reader) Read(p []byte) (n int, err error) {
 	return
 }
 
-func SkipRecords(r *csv.Reader, n uint) {
-	for i := uint(0); i < n; i++ {
-		r.Read()
-	}
-}
-
 // NewCSVReader returns a new csv.Reader that splits on comma
 func NewCSVReader(res io.Reader, comma rune) *csv.Reader {
+	// TODO: Is using bufio actually helping here?
+	// It should at least be the job of the caller to make this buffered.
 	bufRes := bufio.NewReader(res)
 	r := csv.NewReader(reader{r: bufRes})
 	r.Comma = comma

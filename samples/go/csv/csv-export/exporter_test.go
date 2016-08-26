@@ -5,7 +5,6 @@
 package main
 
 import (
-	"encoding/csv"
 	"io"
 	"strings"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/attic-labs/noms/go/d"
 	"github.com/attic-labs/noms/go/datas"
 	"github.com/attic-labs/noms/go/dataset"
+	"github.com/attic-labs/noms/go/lang/encoding/csv"
 	"github.com/attic-labs/noms/go/spec"
 	"github.com/attic-labs/noms/go/types"
 	"github.com/attic-labs/noms/go/util/clienttest"
@@ -67,17 +67,17 @@ func createTestData(s *testSuite, buildAsMap bool) []types.Value {
 func verifyOutput(s *testSuite, stdout string) {
 	csvReader := csv.NewReader(strings.NewReader(stdout))
 
-	row, err := csvReader.Read()
+	row, err := csvReader.ReadFields()
 	d.Chk.NoError(err)
 	s.Equal(s.header, row)
 
 	for i := 0; i < len(s.payload); i++ {
-		row, err := csvReader.Read()
+		row, err := csvReader.ReadFields()
 		d.Chk.NoError(err)
 		s.Equal(s.payload[i], row)
 	}
 
-	_, err = csvReader.Read()
+	_, err = csvReader.ReadFields()
 	s.Equal(io.EOF, err)
 }
 

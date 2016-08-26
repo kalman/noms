@@ -22,7 +22,7 @@ func main() {
 	// https://blog.golang.org/strings
 	delimiter := flag.String("delimiter", ",", "field delimiter for csv file, must be exactly one character long.")
 	header := flag.String("header", "", "header row. If empty, we'll use the first row of the file")
-	skipRecords := flag.Uint("skip-records", 0, "number of records to skip at beginning of file")
+	skipRecords := flag.Int("skip-records", 0, "number of records to skip at beginning of file")
 	detectColumnTypes := flag.Bool("detect-column-types", false, "detect column types by analyzing a portion of csv file")
 	detectPrimaryKeys := flag.Bool("detect-pk", false, "detect primary key candidates by analyzing a portion of csv file")
 	numSamples := flag.Int("num-samples", 1000000, "number of records to use for samples")
@@ -57,11 +57,11 @@ func main() {
 	d.CheckErrorNoUsage(err)
 
 	cr := csv.NewCSVReader(r, comma)
-	csv.SkipRecords(cr, *skipRecords)
+	cr.SkipRecords(*skipRecords)
 
 	var headers []string
 	if *header == "" {
-		headers, err = cr.Read()
+		headers, err = cr.ReadFields()
 		d.PanicIfError(err)
 	} else {
 		headers = strings.Split(*header, string(comma))

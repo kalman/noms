@@ -6,11 +6,11 @@ package csv
 
 import (
 	"bytes"
-	"encoding/csv"
 	"testing"
 
 	"github.com/attic-labs/noms/go/chunks"
 	"github.com/attic-labs/noms/go/datas"
+	"github.com/attic-labs/noms/go/lang/encoding/csv"
 	"github.com/attic-labs/noms/go/types"
 	"github.com/attic-labs/testify/assert"
 )

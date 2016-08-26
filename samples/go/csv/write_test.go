@@ -6,7 +6,6 @@ package csv
 
 import (
 	"bytes"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,6 +16,7 @@ import (
 	"github.com/attic-labs/noms/go/chunks"
 	"github.com/attic-labs/noms/go/d"
 	"github.com/attic-labs/noms/go/datas"
+	"github.com/attic-labs/noms/go/lang/encoding/csv"
 	"github.com/attic-labs/noms/go/types"
 	"github.com/attic-labs/noms/go/util/clienttest"
 	"github.com/attic-labs/testify/suite"
@@ -82,7 +82,7 @@ func startReadingCsvTestExpectationFile(s *csvWriteTestSuite) (cr *csv.Reader, h
 	res, err := os.Open(s.tmpFileName)
 	d.PanicIfError(err)
 	cr = NewCSVReader(res, s.comma)
-	headers, err = cr.Read()
+	headers, err = cr.ReadFields()
 	d.PanicIfError(err)
 	return
 }
