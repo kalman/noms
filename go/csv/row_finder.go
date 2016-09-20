@@ -1,59 +1,23 @@
+// Copyright 2016 Attic Labs, Inc. All rights reserved.
+// Licensed under the Apache License, version 2.0:
+// http://www.apache.org/licenses/LICENSE-2.0
+
 // Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package csv reads and writes comma-separated values (CSV) files.
-// There are many kinds of CSV files; this package supports the format
-// described in RFC 4180.
+// Package csv find rows in comma-separated values (CSV) files.
 //
-// A csv file contains zero or more records of one or more fields per record.
-// Each record is separated by the newline character. The final record may
-// optionally be followed by a newline character.
+// It's actually a fork of Go's encoding/csv package, see there for docs:
+// https://golang.org/src/encoding/csv/reader.go
 //
-//	field1,field2,field3
-//
-// White space is considered part of a field.
-//
-// Carriage returns before newline characters are silently removed.
-//
-// Blank lines are ignored. A line with only whitespace characters (excluding
-// the ending newline character) is not considered a blank line.
-//
-// Fields which start and stop with the quote character " are called
-// quoted-fields. The beginning and ending quote are not part of the
-// field.
-//
-// The source:
-//
-//	normal string,"quoted-field"
-//
-// results in the fields
-//
-//	{`normal string`, `quoted-field`}
-//
-// Within a quoted-field a quote character followed by a second quote
-// character is considered a single quote.
-//
-//	"the ""word"" is true","a ""quoted-field"""
-//
-// results in
-//
-//	{`the "word" is true`, `a "quoted-field"`}
-//
-// Newlines and commas may be included in a quoted-field
-//
-//	"Multi-line
-//	field","comma is ,"
-//
-// results in
-//
-//	{`Multi-line
-//	field`, `comma is ,`}
+// Unlike encoding/csv, this package is much more lightweight, and only supports
+// finding the indices of rows in CSV files. Use Go's encoding/csv for actually
+// parsing the rows.
 package csv
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -74,39 +38,29 @@ func (e *ParseError) Error() string {
 
 // These are the errors that can be returned in ParseError.Error
 var (
-	ErrTrailingComma = errors.New("extra delimiter at end of line") // no longer used
-	ErrBareQuote     = errors.New("bare \" in non-quoted-field")
-	ErrQuote         = errors.New("extraneous \" in field")
-	ErrFieldCount    = errors.New("wrong number of fields in line")
+	ErrBareQuote  = errors.New("bare \" in non-quoted-field")
+	ErrQuote      = errors.New("extraneous \" in field")
+	ErrFieldCount = errors.New("wrong number of fields in line")
 )
 
-// A Reader reads records from a CSV-encoded file.
+// RowFinder finds the indices of rows in a CSV-encoded file. It is a fork of
+// Reader in Go's encoding/csv package.
 //
-// As returned by NewReader, a Reader expects input conforming to RFC 4180.
+// As returned by NewRowFinder, a RowFinder expects input conforming to RFC 4180.
 // The exported fields can be changed to customize the details before the
-// first call to Read or ReadAll.
-//
-//
-type Reader struct {
+// first call to FindNext or FindAll.
+type RowFinder struct {
 	// Comma is the field delimiter.
-	// It is set to comma (',') by NewReader.
+	// It is set to comma (',') by NewRowFinder.
 	Comma rune
 	// Comment, if not 0, is the comment character. Lines beginning with the
 	// Comment character without preceding whitespace are ignored.
 	// With leading whitespace the Comment character becomes part of the
 	// field, even if TrimLeadingSpace is true.
 	Comment rune
-	// FieldsPerRecord is the number of expected fields per record.
-	// If FieldsPerRecord is positive, Read requires each record to
-	// have the given number of fields. If FieldsPerRecord is 0, Read sets it to
-	// the number of fields in the first record, so that future records must
-	// have the same field count. If FieldsPerRecord is negative, no check is
-	// made and records may have a variable number of fields.
-	FieldsPerRecord int
 	// If LazyQuotes is true, a quote may appear in an unquoted field and a
 	// non-doubled quote may appear in a quoted field.
-	LazyQuotes    bool
-	TrailingComma bool // ignored; here for backwards compatibility
+	LazyQuotes bool
 	// If TrimLeadingSpace is true, leading white space in a field is ignored.
 	// This is done even if the field delimiter, Comma, is white space.
 	TrimLeadingSpace bool
@@ -114,19 +68,19 @@ type Reader struct {
 	line   int
 	column int
 	r      *bufio.Reader
-	field  bytes.Buffer
+	offset uint64
 }
 
-// NewReader returns a new Reader that reads from r.
-func NewReader(r io.Reader) *Reader {
-	return &Reader{
+// NewRowFinder returns a new RowFinder that reads from r.
+func NewRowFinder(r io.Reader) *RowFinder {
+	return &RowFinder{
 		Comma: ',',
 		r:     bufio.NewReader(r),
 	}
 }
 
 // error creates a new ParseError based on err.
-func (r *Reader) error(err error) error {
+func (r *RowFinder) error(err error) error {
 	return &ParseError{
 		Line:   r.line,
 		Column: r.column,
@@ -134,63 +88,92 @@ func (r *Reader) error(err error) error {
 	}
 }
 
-// Read reads one record from r. The record is a slice of strings with each
-// string representing one field.
-func (r *Reader) Read() (record []string, err error) {
+// FindNext returns the offset of the next row within the io.Reader, or io.EOF
+// if there were no more files.
+//
+// Note that given a CSV file like:
+//
+//  a,b,cc
+//  ddd,e,f
+//  g,h,i
+//
+// The first call to FindNext will return 7 (index of ddd...), the second call
+// will return 15 (index of "g,h..."), and the third call will return EOF.
+//
+// Blank lines are treated as the end of rows. No guarantees are made about
+// whether comments are treated as the start or end of rows.
+//
+// It may return a different error if the io.Reader returns an error, or if the
+// CSV file fails to parse.
+func (r *RowFinder) FindNext() (offset uint64, err error) {
 	for {
-		record, err = r.parseRecord()
-		if record != nil {
+		var found bool
+		found, err = r.parseRecord()
+		if found {
+			break
+		}
+		if err != nil {
+			return
+		}
+	}
+
+	// Skip over trailing comments.
+	for {
+		var didSkip bool
+		if didSkip, err = r.skipComment(); !didSkip {
+			break
+		}
+	}
+
+	// Skip over trailing blank lines.
+	for {
+		var r1 rune
+		if r1, err = r.peekRune(); r1 != '\n' || err != nil {
+			break
+		}
+		r.readRune()
+	}
+
+	offset = r.offset
+	return
+}
+
+// FindAll returns a slice of indices of each row break (as a result of calling
+// FindNext until EOF). If a non-EOF error, returns nil offsets with that error.
+func (r *RowFinder) FindAll() (offsets []uint64, err error) {
+	for {
+		offset, err := r.FindNext()
+		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
+		offsets = append(offsets, offset)
 	}
-
-	if r.FieldsPerRecord > 0 {
-		if len(record) != r.FieldsPerRecord {
-			r.column = 0 // report at start of record
-			return record, r.error(ErrFieldCount)
-		}
-	} else if r.FieldsPerRecord == 0 {
-		r.FieldsPerRecord = len(record)
-	}
-	return record, nil
-}
-
-// ReadAll reads all the remaining records from r.
-// Each record is a slice of fields.
-// A successful call returns err == nil, not err == io.EOF. Because ReadAll is
-// defined to read until EOF, it does not treat end of file as an error to be
-// reported.
-func (r *Reader) ReadAll() (records [][]string, err error) {
-	for {
-		record, err := r.Read()
-		if err == io.EOF {
-			return records, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
+	return
 }
 
 // readRune reads one rune from r, folding \r\n to \n and keeping track
 // of how far into the line we have read.  r.column will point to the start
 // of this rune, not the end of this rune.
-func (r *Reader) readRune() (rune, error) {
-	r1, _, err := r.r.ReadRune()
+func (r *RowFinder) readRune() (rune, error) {
+	r1, size, err := r.r.ReadRune()
+	if err == nil {
+		r.offset += uint64(size)
+	}
 
 	// Handle \r\n here. We make the simplifying assumption that
 	// anytime \r is followed by \n that it can be folded to \n.
 	// We will not detect files which contain both \r\n and bare \n.
 	if r1 == '\r' {
-		r1, _, err = r.r.ReadRune()
+		r1, size, err = r.r.ReadRune()
 		if err == nil {
 			if r1 != '\n' {
 				r.r.UnreadRune()
 				r1 = '\r'
+			} else {
+				r.offset += uint64(size)
 			}
 		}
 	}
@@ -198,8 +181,24 @@ func (r *Reader) readRune() (rune, error) {
 	return r1, err
 }
 
-// skip reads runes up to and including the rune delim or until error.
-func (r *Reader) skip(delim rune) error {
+// peekRune returns the next rune that readRune will return.
+func (r *RowFinder) peekRune() (rune, error) {
+	r1, _, err := r.r.ReadRune()
+
+	if r1 == '\r' {
+		r1, _, err = r.r.ReadRune()
+		if err == nil && r1 != '\n' {
+			r1 = '\r'
+		}
+		r.r.UnreadRune()
+	}
+
+	r.r.UnreadRune()
+	return r1, err
+}
+
+// skip consumes runes up to and including the rune delim or until error.
+func (r *RowFinder) skip(delim rune) error {
 	for {
 		r1, err := r.readRune()
 		if err != nil {
@@ -211,53 +210,56 @@ func (r *Reader) skip(delim rune) error {
 	}
 }
 
-// parseRecord reads and parses a single csv record from r.
-func (r *Reader) parseRecord() (fields []string, err error) {
+// parseRecord tries to consume a single csv record from r up to the next line
+// break. Returns true if a record was consumed, false if not (which may or may
+// not imply an error).
+func (r *RowFinder) parseRecord() (bool, error) {
 	// Each record starts on a new line. We increment our line
 	// number (lines start at 1, not 0) and set column to -1
 	// so as we increment in readRune it points to the character we read.
 	r.line++
 	r.column = -1
 
-	// Peek at the first rune. If it is an error we are done.
-	// If we support comments and it is the comment character
-	// then skip to the end of line.
-
-	r1, _, err := r.r.ReadRune()
-	if err != nil {
-		return nil, err
+	if didSkip, err := r.skipComment(); didSkip || err != nil {
+		return false, err
 	}
-
-	if r.Comment != 0 && r1 == r.Comment {
-		return nil, r.skip('\n')
-	}
-	r.r.UnreadRune()
 
 	// At this point we have at least one field.
+	// NOTE: This comment was in Go's CSV Reader code - but it's not clear to me
+	// what it means, or why it's correct, it seemed perfectly reasonable for
+	// there *not* to be a field (e.g. a trailing blank line). In either case, we
+	// use the CSV code differently (we're not extracting fields) so who cares.
 	for {
-		haveField, delim, err := r.parseField()
-		if haveField {
-			// If FieldsPerRecord is greater than 0 we can assume the final
-			// length of fields to be equal to FieldsPerRecord.
-			if r.FieldsPerRecord > 0 && fields == nil {
-				fields = make([]string, 0, r.FieldsPerRecord)
-			}
-			fields = append(fields, r.field.String())
-		}
+		_, delim, err := r.parseField()
 		if delim == '\n' || err == io.EOF {
-			return fields, err
+			return true, err
 		} else if err != nil {
-			return nil, err
+			return false, err
 		}
 	}
 }
 
-// parseField parses the next field in the record. The read field is
-// located in r.field. Delim is the first character not part of the field
-// (r.Comma or '\n').
-func (r *Reader) parseField() (haveField bool, delim rune, err error) {
-	r.field.Reset()
+// skipComment peeks at the first rune. If it is an error we are done. If we
+// support comments and it is the comment character then skip to the end of
+// line.
+func (r *RowFinder) skipComment() (bool, error) {
+	r1, size, err := r.r.ReadRune()
+	if err != nil {
+		return false, err
+	}
 
+	if r.Comment != 0 && r1 == r.Comment {
+		r.offset += uint64(size)
+		return true, r.skip('\n')
+	}
+
+	r.r.UnreadRune()
+	return false, nil
+}
+
+// parseField consumes the next field in the record. Delim is the first
+// character not part of the field (r.Comma or '\n').
+func (r *RowFinder) parseField() (haveField bool, delim rune, err error) {
 	r1, err := r.readRune()
 	for err == nil && r.TrimLeadingSpace && r1 != '\n' && unicode.IsSpace(r1) {
 		r1, err = r.readRune()
@@ -309,20 +311,16 @@ func (r *Reader) parseField() (haveField bool, delim rune, err error) {
 						r.column--
 						return false, 0, r.error(ErrQuote)
 					}
-					// accept the bare quote
-					r.field.WriteRune('"')
 				}
 			case '\n':
 				r.line++
 				r.column = -1
 			}
-			r.field.WriteRune(r1)
 		}
 
 	default:
 		// unquoted field
 		for {
-			r.field.WriteRune(r1)
 			r1, err = r.readRune()
 			if err != nil || r1 == r.Comma {
 				break

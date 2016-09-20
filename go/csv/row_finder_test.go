@@ -11,17 +11,14 @@ import (
 )
 
 var readTests = []struct {
-	Name               string
-	Input              string
-	Output             [][]string
-	UseFieldsPerRecord bool // false (default) means FieldsPerRecord is -1
+	Name   string
+	Input  string
+	Output []uint64
 
-	// These fields are copied into the Reader
+	// These fields are copied into the RowFinder
 	Comma            rune
 	Comment          rune
-	FieldsPerRecord  int
 	LazyQuotes       bool
-	TrailingComma    bool
 	TrimLeadingSpace bool
 
 	Error  string
@@ -31,44 +28,38 @@ var readTests = []struct {
 	{
 		Name:   "Simple",
 		Input:  "a,b,c\n",
-		Output: [][]string{{"a", "b", "c"}},
+		Output: nil,
 	},
 	{
 		Name:   "CRLF",
 		Input:  "a,b\r\nc,d\r\n",
-		Output: [][]string{{"a", "b"}, {"c", "d"}},
+		Output: []uint64{5},
 	},
 	{
 		Name:   "BareCR",
 		Input:  "a,b\rc,d\r\n",
-		Output: [][]string{{"a", "b\rc", "d"}},
+		Output: nil,
 	},
 	{
-		Name:               "RFC4180test",
-		UseFieldsPerRecord: true,
+		Name: "RFC4180test",
 		Input: `#field1,field2,field3
 "aaa","bb
 b","ccc"
 "a,a","b""bb","ccc"
 zzz,yyy,xxx
 `,
-		Output: [][]string{
-			{"#field1", "field2", "field3"},
-			{"aaa", "bb\nb", "ccc"},
-			{"a,a", `b"bb`, "ccc"},
-			{"zzz", "yyy", "xxx"},
-		},
+		Output: []uint64{22, 41, 61},
 	},
 	{
 		Name:   "NoEOLTest",
 		Input:  "a,b,c",
-		Output: [][]string{{"a", "b", "c"}},
+		Output: nil,
 	},
 	{
 		Name:   "Semicolon",
 		Comma:  ';',
 		Input:  "a;b;c\n",
-		Output: [][]string{{"a", "b", "c"}},
+		Output: nil,
 	},
 	{
 		Name: "MultiLine",
@@ -76,64 +67,81 @@ zzz,yyy,xxx
 line","one line","three
 line
 field"`,
-		Output: [][]string{{"two\nline", "one line", "three\nline\nfield"}},
+		Output: nil,
 	},
 	{
-		Name:  "BlankLine",
-		Input: "a,b,c\n\nd,e,f\n\n",
-		Output: [][]string{
-			{"a", "b", "c"},
-			{"d", "e", "f"},
-		},
+		Name:   "BlankLine1",
+		Input:  "a,b,c\n\nd,e,f\n\n",
+		Output: []uint64{7},
 	},
 	{
-		Name:               "BlankLineFieldCount",
-		Input:              "a,b,c\n\nd,e,f\n\n",
-		UseFieldsPerRecord: true,
-		Output: [][]string{
-			{"a", "b", "c"},
-			{"d", "e", "f"},
-		},
-	},
-	{
-		Name:             "TrimSpace",
-		Input:            " a,  b,   c\n",
-		TrimLeadingSpace: true,
-		Output:           [][]string{{"a", "b", "c"}},
+		Name:   "BlankLine2",
+		Input:  "a,b,c\n\n\n\n\nd,e,f\n\n\n\n\ng,h,i\nj,k,l\n\n\n",
+		Output: []uint64{10, 20, 26},
 	},
 	{
 		Name:   "LeadingSpace",
 		Input:  " a,  b,   c\n",
-		Output: [][]string{{" a", "  b", "   c"}},
+		Output: nil,
 	},
 	{
-		Name:    "Comment",
+		Name:    "Comment1",
 		Comment: '#',
 		Input:   "#1,2,3\na,b,c\n#comment",
-		Output:  [][]string{{"a", "b", "c"}},
+		Output:  nil,
+	},
+	{
+		Name:    "Comment2",
+		Comment: '#',
+		Input:   "#1,2,3\na,b,c\n#comment\n#comment2",
+		Output:  nil,
+	},
+	{
+		Name:    "Comment3",
+		Comment: '#',
+		Input:   "#1,2,3\na,b,c\nd,e,f\n#comment",
+		Output:  []uint64{13},
+	},
+	{
+		Name:    "Comment4",
+		Comment: '#',
+		Input:   "#1,2,3\na,b,c\nd,e,f\n#comment\n#comment2",
+		Output:  []uint64{13},
+	},
+	{
+		Name:    "Comment5",
+		Comment: '#',
+		Input:   "#1,2,3\na,b,c\n#comment\nd,e,f\n",
+		Output:  []uint64{22},
+	},
+	{
+		Name:    "Comment6",
+		Comment: '#',
+		Input:   "#1,2,3\na,b,c\nd,e,f\n#comment\ng,h,i\n",
+		Output:  []uint64{13, 28},
 	},
 	{
 		Name:   "NoComment",
 		Input:  "#1,2,3\na,b,c",
-		Output: [][]string{{"#1", "2", "3"}, {"a", "b", "c"}},
+		Output: []uint64{7},
 	},
 	{
 		Name:       "LazyQuotes",
 		LazyQuotes: true,
 		Input:      `a "word","1"2",a","b`,
-		Output:     [][]string{{`a "word"`, `1"2`, `a"`, `b`}},
+		Output:     nil,
 	},
 	{
 		Name:       "BareQuotes",
 		LazyQuotes: true,
 		Input:      `a "word","1"2",a"`,
-		Output:     [][]string{{`a "word"`, `1"2`, `a"`}},
+		Output:     nil,
 	},
 	{
 		Name:       "BareDoubleQuotes",
 		LazyQuotes: true,
 		Input:      `a""b,c`,
-		Output:     [][]string{{`a""b`, `c`}},
+		Output:     nil,
 	},
 	{
 		Name:  "BadDoubleQuotes",
@@ -144,7 +152,7 @@ field"`,
 		Name:             "TrimQuote",
 		Input:            ` "a"," b",c`,
 		TrimLeadingSpace: true,
-		Output:           [][]string{{"a", " b", "c"}},
+		Output:           nil,
 	},
 	{
 		Name:  "BadBareQuote",
@@ -162,59 +170,45 @@ field"`,
 		Error: `extraneous " in field`, Line: 1, Column: 3,
 	},
 	{
-		Name:               "BadFieldCount",
-		UseFieldsPerRecord: true,
-		Input:              "a,b,c\nd,e",
-		Error:              "wrong number of fields", Line: 2,
-	},
-	{
-		Name:               "BadFieldCount1",
-		UseFieldsPerRecord: true,
-		FieldsPerRecord:    2,
-		Input:              `a,b,c`,
-		Error:              "wrong number of fields", Line: 1,
-	},
-	{
 		Name:   "FieldCount",
 		Input:  "a,b,c\nd,e",
-		Output: [][]string{{"a", "b", "c"}, {"d", "e"}},
+		Output: []uint64{6},
 	},
 	{
 		Name:   "TrailingCommaEOF",
 		Input:  "a,b,c,",
-		Output: [][]string{{"a", "b", "c", ""}},
+		Output: nil,
 	},
 	{
 		Name:   "TrailingCommaEOL",
 		Input:  "a,b,c,\n",
-		Output: [][]string{{"a", "b", "c", ""}},
+		Output: nil,
 	},
 	{
 		Name:             "TrailingCommaSpaceEOF",
 		TrimLeadingSpace: true,
 		Input:            "a,b,c, ",
-		Output:           [][]string{{"a", "b", "c", ""}},
+		Output:           nil,
 	},
 	{
 		Name:             "TrailingCommaSpaceEOL",
 		TrimLeadingSpace: true,
 		Input:            "a,b,c, \n",
-		Output:           [][]string{{"a", "b", "c", ""}},
+		Output:           nil,
 	},
 	{
 		Name:             "TrailingCommaLine3",
 		TrimLeadingSpace: true,
 		Input:            "a,b,c\nd,e,f\ng,hi,",
-		Output:           [][]string{{"a", "b", "c"}, {"d", "e", "f"}, {"g", "hi", ""}},
+		Output:           []uint64{6, 12},
 	},
 	{
 		Name:   "NotTrailingComma3",
 		Input:  "a,b,c, \n",
-		Output: [][]string{{"a", "b", "c", " "}},
+		Output: nil,
 	},
 	{
-		Name:          "CommaFieldTest",
-		TrailingComma: true,
+		Name: "CommaFieldTest",
 		Input: `x,y,z,w
 x,y,z,
 x,y,,
@@ -226,57 +220,26 @@ x,,,
 "x","","",""
 "","","",""
 `,
-		Output: [][]string{
-			{"x", "y", "z", "w"},
-			{"x", "y", "z", ""},
-			{"x", "y", "", ""},
-			{"x", "", "", ""},
-			{"", "", "", ""},
-			{"x", "y", "z", "w"},
-			{"x", "y", "z", ""},
-			{"x", "y", "", ""},
-			{"x", "", "", ""},
-			{"", "", "", ""},
-		},
+		Output: []uint64{8, 15, 21, 26, 30, 46, 61, 75, 88},
 	},
 	{
 		Name:             "TrailingCommaIneffective1",
-		TrailingComma:    true,
 		TrimLeadingSpace: true,
 		Input:            "a,b,\nc,d,e",
-		Output: [][]string{
-			{"a", "b", ""},
-			{"c", "d", "e"},
-		},
-	},
-	{
-		Name:             "TrailingCommaIneffective2",
-		TrailingComma:    false,
-		TrimLeadingSpace: true,
-		Input:            "a,b,\nc,d,e",
-		Output: [][]string{
-			{"a", "b", ""},
-			{"c", "d", "e"},
-		},
+		Output:           []uint64{5},
 	},
 }
 
-func TestRead(t *testing.T) {
+func TestFind(t *testing.T) {
 	for _, tt := range readTests {
-		r := NewReader(strings.NewReader(tt.Input))
+		r := NewRowFinder(strings.NewReader(tt.Input))
 		r.Comment = tt.Comment
-		if tt.UseFieldsPerRecord {
-			r.FieldsPerRecord = tt.FieldsPerRecord
-		} else {
-			r.FieldsPerRecord = -1
-		}
 		r.LazyQuotes = tt.LazyQuotes
-		r.TrailingComma = tt.TrailingComma
 		r.TrimLeadingSpace = tt.TrimLeadingSpace
 		if tt.Comma != 0 {
 			r.Comma = tt.Comma
 		}
-		out, err := r.ReadAll()
+		out, err := r.FindAll()
 		perr, _ := err.(*ParseError)
 		if tt.Error != "" {
 			if err == nil || !strings.Contains(err.Error(), tt.Error) {
@@ -287,12 +250,12 @@ func TestRead(t *testing.T) {
 		} else if err != nil {
 			t.Errorf("%s: unexpected error %v", tt.Name, err)
 		} else if !reflect.DeepEqual(out, tt.Output) {
-			t.Errorf("%s: out=%q want %q", tt.Name, out, tt.Output)
+			t.Errorf("%s: out=%v want %v", tt.Name, out, tt.Output)
 		}
 	}
 }
 
-func BenchmarkRead(b *testing.B) {
+func BenchmarkFind(b *testing.B) {
 	data := `x,y,z,w
 x,y,z,
 x,y,,
@@ -306,7 +269,7 @@ x,,,
 `
 
 	for i := 0; i < b.N; i++ {
-		_, err := NewReader(strings.NewReader(data)).ReadAll()
+		_, err := NewRowFinder(strings.NewReader(data)).FindAll()
 
 		if err != nil {
 			b.Fatalf("could not read data: %s", err)
