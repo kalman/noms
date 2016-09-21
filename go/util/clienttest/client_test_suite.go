@@ -50,10 +50,7 @@ func (suite *ClientTestSuite) TearDownSuite() {
 
 // MustRun is a wrapper around Run that will panic on Exit or Panic
 func (suite *ClientTestSuite) MustRun(m func(), args []string) (stdout string, stderr string) {
-	var err interface{}
-	if stdout, stderr, err = suite.Run(m, args); err != nil {
-		panic(err)
-	}
+	stdout, stderr, _ = suite.runMaybeRecover(m, args, false)
 	return
 }
 
@@ -61,6 +58,10 @@ func (suite *ClientTestSuite) MustRun(m func(), args []string) (stdout string, s
 // If m()  panics the panic is caught, and returned with recoveredError
 // If m() calls os.Exit() m() will panic and return ExitError with recoveredError
 func (suite *ClientTestSuite) Run(m func(), args []string) (stdout string, stderr string, recoveredErr interface{}) {
+	return suite.runMaybeRecover(m, args, true)
+}
+
+func (suite *ClientTestSuite) runMaybeRecover(m func(), args []string, doRecover bool) (stdout string, stderr string, recoveredErr interface{}) {
 	origArgs := os.Args
 	origOut := os.Stdout
 	origErr := os.Stderr
@@ -70,11 +71,15 @@ func (suite *ClientTestSuite) Run(m func(), args []string) (stdout string, stder
 	os.Stderr = suite.err
 
 	defer func() {
-		recoveredErr = recover()
+		if doRecover {
+			recoveredErr = recover()
+		}
+
 		_, err := suite.out.Seek(0, 0)
 		d.Chk.NoError(err)
 		capturedOut, err := ioutil.ReadAll(os.Stdout)
 		d.Chk.NoError(err)
+		stdout = string(capturedOut)
 
 		_, err = suite.out.Seek(0, 0)
 		d.Chk.NoError(err)
@@ -85,6 +90,7 @@ func (suite *ClientTestSuite) Run(m func(), args []string) (stdout string, stder
 		d.Chk.NoError(err)
 		capturedErr, err := ioutil.ReadAll(os.Stderr)
 		d.Chk.NoError(err)
+		stderr = string(capturedErr)
 
 		_, err = suite.err.Seek(0, 0)
 		d.Chk.NoError(err)
@@ -93,7 +99,6 @@ func (suite *ClientTestSuite) Run(m func(), args []string) (stdout string, stder
 		os.Args = origArgs
 		os.Stdout = origOut
 		os.Stderr = origErr
-		stdout, stderr = string(capturedOut), string(capturedErr)
 	}()
 
 	suite.ExitStatus = 0

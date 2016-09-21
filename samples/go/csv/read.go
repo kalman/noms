@@ -15,7 +15,8 @@ import (
 	"github.com/attic-labs/noms/go/types"
 )
 
-// StringToKind maps names of valid NomsKinds (e.g. Bool, Number, etc) to their associated types.NomsKind
+// StringToKind maps names of valid NomsKinds (e.g. Bool, Number, etc) to their
+// associated types.NomsKind
 var StringToKind = func(kindMap map[types.NomsKind]string) map[string]types.NomsKind {
 	m := map[string]types.NomsKind{}
 	for k, v := range kindMap {
@@ -24,7 +25,8 @@ var StringToKind = func(kindMap map[types.NomsKind]string) map[string]types.Noms
 	return m
 }(types.KindToString)
 
-// StringsToKinds looks up each element of strs in the StringToKind map and returns a slice of answers
+// StringsToKinds looks up each element of strs in the StringToKind map and
+// returns a slice of answers
 func StringsToKinds(strs []string) KindSlice {
 	kinds := make(KindSlice, len(strs))
 	for i, str := range strs {
@@ -35,7 +37,8 @@ func StringsToKinds(strs []string) KindSlice {
 	return kinds
 }
 
-// KindsToStrings looks up each element of kinds in the types.KindToString map and returns a slice of answers
+// KindsToStrings looks up each element of kinds in the types.KindToString map
+// and returns a slice of answers
 func KindsToStrings(kinds KindSlice) []string {
 	strs := make([]string, len(kinds))
 	for i, k := range kinds {
@@ -44,7 +47,8 @@ func KindsToStrings(kinds KindSlice) []string {
 	return strs
 }
 
-//EscapeStructFieldFromCSV removes special characters and replaces spaces with camelCasing (camel case turns to camelCase)
+// EscapeStructFieldFromCSV removes special characters and replaces spaces with
+// camelCasing (camel case turns to camelCase)
 func EscapeStructFieldFromCSV(input string) string {
 	if types.IsValidStructFieldName(input) {
 		return input
@@ -52,7 +56,8 @@ func EscapeStructFieldFromCSV(input string) string {
 	return types.CamelCaseFieldName(input)
 }
 
-// MakeStructTypeFromHeaders creates a struct type from the headers using |kinds| as the type of each field. If |kinds| is empty, default to strings.
+// MakeStructTypeFromHeaders creates a struct type from the headers using
+// |kinds| as the type of each field. If |kinds| is empty, default to strings.
 func MakeStructTypeFromHeaders(headers []string, structName string, kinds KindSlice) (typ *types.Type, fieldOrder []int, kindMap []types.NomsKind) {
 	useStringType := len(kinds) == 0
 	d.PanicIfFalse(useStringType || len(headers) == len(kinds))
@@ -91,8 +96,14 @@ func MakeStructTypeFromHeaders(headers []string, structName string, kinds KindSl
 	return
 }
 
-// ReadToList takes a CSV reader and reads data into a typed List of structs. Each row gets read into a struct named structName, described by headers. If the original data contained headers it is expected that the input reader has already read those and are pointing at the first data row.
-// If kinds is non-empty, it will be used to type the fields in the generated structs; otherwise, they will be left as string-fields.
+// ReadToList takes a CSV reader and reads data into a typed List of structs.
+// Each row gets read into a struct named structName, described by headers. If
+// the original data contained headers it is expected that the input reader has
+// already read those and are pointing at the first data row.
+//
+// If kinds is non-empty, it will be used to type the fields in the generated
+// structs; otherwise, they will be left as string-fields.
+//
 // In addition to the list, ReadToList returns the typeDef of the structs in the list.
 func ReadToList(r *csv.Reader, structName string, headers []string, kinds KindSlice, vrw types.ValueReadWriter) (l types.List, t *types.Type) {
 	t, fieldOrder, kindMap := MakeStructTypeFromHeaders(headers, structName, kinds)
@@ -115,7 +126,9 @@ func ReadToList(r *csv.Reader, structName string, headers []string, kinds KindSl
 	return <-listChan, t
 }
 
-// getFieldIndexByHeaderName takes the collection of headers and the name to search for and returns the index of name within the headers or -1 if not found
+// getFieldIndexByHeaderName takes the collection of headers and the name to
+// search for and returns the index of name within the headers or -1 if not
+// found
 func getFieldIndexByHeaderName(headers []string, name string) int {
 	for i, header := range headers {
 		if header == name {
@@ -125,7 +138,11 @@ func getFieldIndexByHeaderName(headers []string, name string) int {
 	return -1
 }
 
-// getPkIndices takes collection of primary keys as strings and determines if they are integers, if so then use those ints as the indices, otherwise it looks up the strings in the headers to find the indices; returning the collection of int indices representing the primary keys maintaining the order of strPks to the return collection
+// getPkIndices takes collection of primary keys as strings and determines if
+// they are integers, if so then use those ints as the indices, otherwise it
+// looks up the strings in the headers to find the indices; returning the
+// collection of int indices representing the primary keys maintaining the
+// order of strPks to the return collection
 func getPkIndices(strPks []string, headers []string) []int {
 	result := make([]int, len(strPks))
 	for i, pk := range strPks {
@@ -136,7 +153,7 @@ func getPkIndices(strPks []string, headers []string) []int {
 			result[i] = getFieldIndexByHeaderName(headers, pk)
 		}
 		if result[i] < 0 {
-			d.Chk.Fail(fmt.Sprintf("Invalid pk: %v", pk))
+			panic(fmt.Errorf("Invalid pk: %v", pk))
 		}
 	}
 	return result
@@ -149,7 +166,7 @@ func readFieldsFromRow(row []string, headers []string, fieldOrder []int, kindMap
 			fieldOrigIndex := fieldOrder[i]
 			val, err := StringToValue(v, kindMap[fieldOrigIndex])
 			if err != nil {
-				d.Chk.Fail(fmt.Sprintf("Error parsing value for column '%s': %s", headers[i], err))
+				panic(fmt.Errorf("Error parsing value for column '%s': %s", headers[i], err))
 			}
 			fields[fieldOrigIndex] = val
 		}
@@ -157,8 +174,13 @@ func readFieldsFromRow(row []string, headers []string, fieldOrder []int, kindMap
 	return fields
 }
 
-// ReadToMap takes a CSV reader and reads data into a typed Map of structs. Each row gets read into a struct named structName, described by headers. If the original data contained headers it is expected that the input reader has already read those and are pointing at the first data row.
-// If kinds is non-empty, it will be used to type the fields in the generated structs; otherwise, they will be left as string-fields.
+// ReadToMap takes a CSV reader and reads data into a typed Map of structs.
+// Each row gets read into a struct named structName, described by headers. If
+// the original data contained headers it is expected that the input reader has
+// already read those and are pointing at the first data row.
+//
+// If kinds is non-empty, it will be used to type the fields in the generated
+// structs; otherwise, they will be left as string-fields.
 func ReadToMap(r *csv.Reader, structName string, headersRaw []string, primaryKeys []string, kinds KindSlice, vrw types.ValueReadWriter) types.Map {
 	t, fieldOrder, kindMap := MakeStructTypeFromHeaders(headersRaw, structName, kinds)
 	pkIndices := getPkIndices(primaryKeys, headersRaw)

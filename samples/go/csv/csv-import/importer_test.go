@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/attic-labs/noms/go/chunks"
@@ -105,7 +106,7 @@ func validateNestedMap(s *testSuite, m types.Map) {
 	}
 }
 
-func (s *testSuite) TestCSVImporter() {
+func (s *testSuite) TestCSVImporterSimple() {
 	setName := "csv"
 	dataspec := spec.CreateValueSpecString("ldb", s.LdbDir, setName)
 	stdout, stderr := s.MustRun(main, []string{"--no-progress", "--column-types", TEST_FIELDS, s.tmpFileName, dataspec})
@@ -342,11 +343,16 @@ func (s *testSuite) TestCSVImportSkipRecordsTooMany() {
 	setName := "csv"
 	dataspec := spec.CreateValueSpecString("ldb", s.LdbDir, setName)
 
-	stdout, stderr, recoveredErr := s.Run(main, []string{"--no-progress", "--skip-records", "100", input.Name(), dataspec})
-	s.Equal("", stdout)
-	s.Equal("error: skip-records skipped past EOF\n", stderr)
-	s.Equal(clienttest.ExitError{-1}, recoveredErr)
+	test := func(tooMany int) {
+		stdout, stderr, recoveredErr := s.Run(main, []string{"--no-progress", "--skip-records", strconv.Itoa(tooMany), input.Name(), dataspec})
+		s.Equal("", stdout)
+		s.Equal("error: skip-records skipped past EOF\n", stderr)
+		s.Equal(clienttest.ExitError{-1}, recoveredErr)
+	}
 
+	test(TEST_DATA_SIZE)
+	test(TEST_DATA_SIZE + 1)
+	test(TEST_DATA_SIZE * 2)
 }
 
 func (s *testSuite) TestCSVImportSkipRecordsCustomHeader() {

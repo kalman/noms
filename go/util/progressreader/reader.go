@@ -9,23 +9,24 @@ import (
 	"io"
 	"time"
 
+	"github.com/attic-labs/noms/go/d"
 	"github.com/attic-labs/noms/go/util/status"
 )
 
 type Callback func(seen uint64)
 
-func New(inner io.Reader, cb Callback) io.Reader {
-	return &reader{inner, uint64(0), time.Time{}, cb}
+func New(inner io.Reader, cb Callback) *Reader {
+	return &Reader{inner, uint64(0), time.Time{}, cb}
 }
 
-type reader struct {
+type Reader struct {
 	inner    io.Reader
 	seen     uint64
 	lastTime time.Time
 	cb       Callback
 }
 
-func (r *reader) Read(p []byte) (n int, err error) {
+func (r *Reader) Read(p []byte) (n int, err error) {
 	n, err = r.inner.Read(p)
 	r.seen += uint64(n)
 
@@ -34,4 +35,10 @@ func (r *reader) Read(p []byte) (n int, err error) {
 		r.lastTime = now
 	}
 	return
+}
+
+func (r *Reader) Seek(offset int64, whence int) (ret int64, err error) {
+	rs, ok := r.inner.(io.ReadSeeker)
+	d.PanicIfFalse(ok, "Reader is not a Seeker")
+	return rs.Seek(offset, whence)
 }

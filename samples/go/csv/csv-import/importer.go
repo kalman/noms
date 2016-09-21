@@ -10,8 +10,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	nomcsv "github.com/attic-labs/noms/go/csv"
 	"github.com/attic-labs/noms/go/d"
 	"github.com/attic-labs/noms/go/dataset"
 	"github.com/attic-labs/noms/go/spec"
@@ -28,6 +30,24 @@ const (
 	destList = iota
 	destMap  = iota
 )
+
+type limitReader struct {
+	r   io.Reader
+	lim uint64
+}
+
+func (r *limitReader) Read(buf []byte) (n int, err error) {
+	if r.lim == 0 {
+		return 0, io.EOF
+	}
+	if r.lim < uint64(len(buf)) {
+		buf = buf[:int(r.lim)]
+	}
+	n, err = r.r.Read(buf)
+	r.lim -= uint64(n)
+	d.PanicIfTrue(r.lim < 0)
+	return
+}
 
 func main() {
 	// Actually the delimiter uses runes, which can be multiple characters long.
@@ -67,45 +87,29 @@ func main() {
 	}
 	d.CheckError(err)
 
-	defer profile.MaybeStartProfile().Stop()
-
-	var r io.Reader
-	var size uint64
-	var filePath string
-	var dataSetArgN int
-
-	if *path != "" {
-		db, val, err := spec.GetPath(*path)
-		d.CheckError(err)
-		if val == nil {
-			d.CheckError(fmt.Errorf("Path %s not found\n", *path))
-		}
-		blob, ok := val.(types.Blob)
-		if !ok {
-			d.CheckError(fmt.Errorf("Path %s not a Blob: %s\n", *path, types.EncodedValue(val.Type())))
-		}
-		defer db.Close()
-		r = blob.Reader()
-		size = blob.Len()
-		dataSetArgN = 0
-	} else {
-		filePath = flag.Arg(0)
-		res, err := os.Open(filePath)
-		d.CheckError(err)
-		defer res.Close()
-		fi, err := res.Stat()
-		d.CheckError(err)
-		r = res
-		size = uint64(fi.Size())
-		dataSetArgN = 1
-	}
-
-	if !*noProgress {
-		r = progressreader.New(r, getStatusPrinter(size))
-	}
-
 	delim, err := csv.StringToRune(*delimiter)
 	d.CheckErrorNoUsage(err)
+
+	defer profile.MaybeStartProfile().Stop()
+
+	// Analyse CSV file structure.
+	// TODO: Show progress.
+	r1, closer1, _, _, _ := open(*path)
+	defer closer1.Close()
+
+	rowFinder := nomcsv.NewRowFinder(r1)
+	rowFinder.Comma = delim
+	rowOffsets, err := rowFinder.FindAll()
+	d.PanicIfError(err)
+
+	// Read header, and possibly the rest of the file if we're not reading to a
+	// list (otherwise it'll be done in parallel later).
+	r2, closer2, size, filePath, dataSetArgN := open(*path)
+	defer closer2.Close()
+
+	if !*noProgress {
+		r2 = progressreader.New(r2, getStatusPrinter(size))
+	}
 
 	var dest int
 	var strPks []string
@@ -123,8 +127,18 @@ func main() {
 		return
 	}
 
-	cr := csv.NewCSVReader(r, delim)
+	cr := csv.NewCSVReader(r2, delim)
 	err = csv.SkipRecords(cr, *skipRecords)
+
+	var rowRanges []uint64
+	if *skipRecords == 0 {
+		rowRanges = append(rowRanges, 0)
+		rowRanges = append(rowRanges, rowOffsets...)
+	} else if int(*skipRecords)-1 < len(rowOffsets) {
+		rowRanges = rowOffsets[*skipRecords-1:]
+	} else {
+		err = io.EOF
+	}
 
 	if err == io.EOF {
 		err = fmt.Errorf("skip-records skipped past EOF")
@@ -135,6 +149,7 @@ func main() {
 	if *header == "" {
 		headers, err = cr.Read()
 		d.PanicIfError(err)
+		rowRanges = rowRanges[1:]
 	} else {
 		headers = strings.Split(*header, ",")
 	}
@@ -160,7 +175,36 @@ func main() {
 	defer ds.Database().Close()
 
 	var value types.Value
-	if dest == destList {
+	if dest == destList && len(rowRanges) > 1 {
+		// Parallel, baby.
+		// TODO: Base on a -p flag or number of CPU cores, not just 2.
+		fstStart, sndStart := rowRanges[0], rowRanges[len(rowRanges)/2]
+		var fst, snd types.List
+		wg := &sync.WaitGroup{}
+		wg.Add(2)
+		go func() {
+			// TODO: Progress?
+			r, closer, _, _, _ := open(*path)
+			defer closer.Close()
+			_, err := r.Seek(int64(fstStart), 0)
+			d.PanicIfError(err)
+			cr = csv.NewCSVReader(&limitReader{r, sndStart - fstStart}, delim)
+			fst, _ = csv.ReadToList(cr, *name, headers, kinds, ds.Database())
+			wg.Done()
+		}()
+		go func() {
+			// TODO: Progress?
+			r, closer, _, _, _ := open(*path)
+			defer closer.Close()
+			_, err := r.Seek(int64(sndStart), 0)
+			d.PanicIfError(err)
+			cr = csv.NewCSVReader(r, delim)
+			snd, _ = csv.ReadToList(cr, *name, headers, kinds, ds.Database())
+			wg.Done()
+		}()
+		wg.Wait()
+		value = fst.Concat(snd)
+	} else if dest == destList {
 		value, _ = csv.ReadToList(cr, *name, headers, kinds, ds.Database())
 	} else {
 		value = csv.ReadToMap(cr, *name, headers, strPks, kinds, ds.Database())
@@ -205,4 +249,40 @@ func getStatusPrinter(expected uint64) progressreader.Callback {
 			humanize.Bytes(expected),
 			humanize.Bytes(uint64(rate)))
 	}
+}
+
+func open(path string) (io.ReadSeeker, io.Closer, uint64, string, int) {
+	var r io.ReadSeeker
+	var closer io.Closer
+	var size uint64
+	var filePath string
+	var dataSetArgN int
+
+	if path != "" {
+		db, val, err := spec.GetPath(path)
+		d.CheckError(err)
+		if val == nil {
+			d.CheckError(fmt.Errorf("Path %s not found\n", path))
+		}
+		blob, ok := val.(types.Blob)
+		if !ok {
+			d.CheckError(fmt.Errorf("Path %s not a Blob: %s\n", path, types.EncodedValue(val.Type())))
+		}
+		r = blob.Reader()
+		closer = db
+		size = blob.Len()
+		dataSetArgN = 0
+	} else {
+		filePath = flag.Arg(0)
+		res, err := os.Open(filePath)
+		d.CheckError(err)
+		fi, err := res.Stat()
+		d.CheckError(err)
+		r = res
+		closer = res
+		size = uint64(fi.Size())
+		dataSetArgN = 1
+	}
+
+	return r, closer, size, filePath, dataSetArgN
 }
