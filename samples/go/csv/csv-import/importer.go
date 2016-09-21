@@ -94,22 +94,22 @@ func main() {
 
 	// Analyse CSV file structure.
 	// TODO: Show progress.
-	r1, closer1, _, _, _ := open(*path)
+	r1, closer1, size, filePath, dataSetArgN := open(*path)
 	defer closer1.Close()
 
-	rowFinder := nomcsv.NewRowFinder(r1)
+	rowFinder := nomcsv.NewRowFinder(progressreader.New(r1, getStatusPrinter("analyzing", size)))
 	rowFinder.Comma = delim
 	rowOffsets, err := rowFinder.FindAll()
 	d.PanicIfError(err)
 
 	// Read header, and possibly the rest of the file if we're not reading to a
 	// list (otherwise it'll be done in parallel later).
-	r2, closer2, size, filePath, dataSetArgN := open(*path)
+	r2, closer2, size, _, _ := open(*path)
 	defer closer2.Close()
 
-	if !*noProgress {
-		r2 = progressreader.New(r2, getStatusPrinter(size))
-	}
+	//if !*noProgress {
+	r2 = progressreader.New(r2, getStatusPrinter("parsing", size))
+	//}
 
 	var dest int
 	var strPks []string
@@ -188,7 +188,8 @@ func main() {
 			defer closer.Close()
 			_, err := r.Seek(int64(fstStart), 0)
 			d.PanicIfError(err)
-			cr = csv.NewCSVReader(&limitReader{r, sndStart - fstStart}, delim)
+			lim := sndStart - fstStart
+			cr = csv.NewCSVReader(progressreader.New(&limitReader{r, lim}, getStatusPrinter("parsing (parallel #1)", lim)), delim)
 			fst, _ = csv.ReadToList(cr, *name, headers, kinds, ds.Database())
 			wg.Done()
 		}()
@@ -237,14 +238,15 @@ func additionalMetaInfo(filePath, nomsPath string) map[string]string {
 	return map[string]string{fileOrNomsPath: path}
 }
 
-func getStatusPrinter(expected uint64) progressreader.Callback {
+func getStatusPrinter(title string, expected uint64) progressreader.Callback {
 	startTime := time.Now()
 	return func(seen uint64) {
 		percent := float64(seen) / float64(expected) * 100
 		elapsed := time.Since(startTime)
 		rate := float64(seen) / elapsed.Seconds()
 
-		status.Printf("%.2f%% of %s (%s/s)...",
+		status.Printf("%s: %.2f%% of %s (%s/s)...",
+			title,
 			percent,
 			humanize.Bytes(expected),
 			humanize.Bytes(uint64(rate)))
