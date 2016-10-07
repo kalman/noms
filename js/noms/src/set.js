@@ -4,7 +4,6 @@
 
 // @flow
 
-import Ref from './ref.js';
 import type {ValueReader} from './value-store.js';
 import type {makeChunkFn} from './sequence-chunker.js';
 import type Value from './value.js'; // eslint-disable-line no-unused-vars
@@ -14,21 +13,24 @@ import Collection from './collection.js';
 import {compare, equals} from './compare.js';
 import {invariant} from './assert.js';
 import {
-  OrderedKey,
   newOrderedMetaSequenceChunkFn,
+  OrderedKey,
 } from './meta-sequence.js';
-import {OrderedSequence, OrderedSequenceCursor, OrderedSequenceIterator} from
-  './ordered-sequence.js';
+import type SequenceCursor from './sequence-cursor.js';
+import {
+  newCursorAtKey,
+  newCursorAtValue,
+} from './ordered-sequence.js';
 import diff from './ordered-sequence-diff.js';
-import {makeSetType, makeUnionType, getTypeOfValue} from './type.js';
 import {removeDuplicateFromOrdered} from './map.js';
-import {getValueChunks} from './sequence.js';
 import {Kind} from './noms-kind.js';
-import type {EqualsFn} from './edit-distance.js';
 import {hashValueBytes} from './rolling-value-hasher.js';
+import {newSetLeafSequence} from './set-leaf-sequence.js';
+import SequenceIterator from './sequence-iterator.js';
 
-function newSetLeafChunkFn<T:Value>(vr: ?ValueReader): makeChunkFn<any, any> {
-  return (items: Array<T>) => {
+function newSetLeafChunkFn<T: Value>(vr: ?ValueReader): makeChunkFn<T, T> {
+  return (items: T[]) => {
+    // $FlowIssue: we're forced to use false as a placeholder for no-value.
     const key = new OrderedKey(items.length > 0 ? items[items.length - 1] : false);
     const seq = newSetLeafSequence(vr, items);
     const ns = Set.fromSequence(seq);
@@ -42,30 +44,22 @@ function buildSetData<T: Value>(values: Array<any>): Array<T> {
   return removeDuplicateFromOrdered(values, compare);
 }
 
-export function newSetLeafSequence<K: Value>(
-    vr: ?ValueReader, items: K[]): SetLeafSequence<any> {
-  const t = makeSetType(makeUnionType(items.map(getTypeOfValue)));
-  return new SetLeafSequence(vr, t, items);
-}
-
-export default class Set<T: Value> extends Collection<OrderedSequence<any, any>> {
+export default class Set<T: Value> extends Collection<T, T> {
   constructor(values: Array<T> = []) {
-    const seq = chunkSequenceSync(
+    super(chunkSequenceSync(
         buildSetData(values),
         newSetLeafChunkFn(null),
         newOrderedMetaSequenceChunkFn(Kind.Set, null),
-        hashValueBytes);
-    invariant(seq instanceof OrderedSequence);
-    super(seq);
+        hashValueBytes));
   }
 
   async has(key: T): Promise<boolean> {
-    const cursor = await this.sequence.newCursorAtValue(key);
+    const cursor = await newCursorAtValue(this.sequence, key);
     return cursor.valid && equals(cursor.getCurrentKey().value(), key);
   }
 
   async _firstOrLast(last: boolean): Promise<?T> {
-    const cursor = await this.sequence.newCursorAt(null, false, last);
+    const cursor = await newCursorAtKey(this.sequence, null, false, last);
     return cursor.valid ? cursor.getCurrent() : null;
   }
 
@@ -78,7 +72,7 @@ export default class Set<T: Value> extends Collection<OrderedSequence<any, any>>
   }
 
   async forEach(cb: (v: T) => ?Promise<any>): Promise<void> {
-    const cursor = await this.sequence.newCursorAt(null);
+    const cursor = await newCursorAtKey(this.sequence, null);
     const promises = [];
     return cursor.iter(v => {
       promises.push(cb(v));
@@ -87,23 +81,23 @@ export default class Set<T: Value> extends Collection<OrderedSequence<any, any>>
   }
 
   iterator(): AsyncIterator<T> {
-    return new OrderedSequenceIterator(this.sequence.newCursorAt(null));
+    return new SequenceIterator(newCursorAtKey(this.sequence, null));
   }
 
   iteratorAt(v: T): AsyncIterator<T> {
-    return new OrderedSequenceIterator(this.sequence.newCursorAtValue(v));
+    return new SequenceIterator(newCursorAtValue(this.sequence, v));
   }
 
-  _splice(cursor: OrderedSequenceCursor<any, any>, insert: Array<T>, remove: number)
+  _splice(cursor: SequenceCursor<any, any>, insert: Array<T>, remove: number)
       : Promise<Set<T>> {
-    const vr = this.sequence.vr;
+    const vr = this.sequence.valueReader;
     return chunkSequence(cursor, vr, insert, remove, newSetLeafChunkFn(vr),
                          newOrderedMetaSequenceChunkFn(Kind.Set, vr),
                          hashValueBytes).then(s => Set.fromSequence(s));
   }
 
   async add(value: T): Promise<Set<T>> {
-    const cursor = await this.sequence.newCursorAtValue(value, true);
+    const cursor = await newCursorAtValue(this.sequence, value, true);
     if (cursor.valid && equals(cursor.getCurrentKey().value(), value)) {
       return this;
     }
@@ -112,7 +106,7 @@ export default class Set<T: Value> extends Collection<OrderedSequence<any, any>>
   }
 
   async delete(value: T): Promise<Set<T>> {
-    const cursor = await this.sequence.newCursorAtValue(value);
+    const cursor = await newCursorAtValue(this.sequence, value);
     if (cursor.valid && equals(cursor.getCurrentKey().value(), value)) {
       return this._splice(cursor, [], 1);
     }
@@ -122,7 +116,7 @@ export default class Set<T: Value> extends Collection<OrderedSequence<any, any>>
 
   // TODO: Find some way to return a Set.
   async map<S>(cb: (v: T) => (Promise<S> | S)): Promise<Array<S>> {
-    const cursor = await this.sequence.newCursorAt(null);
+    const cursor = await newCursorAtKey(this.sequence, null);
     const values = [];
     await cursor.iter(v => {
       values.push(cb(v));
@@ -144,20 +138,5 @@ export default class Set<T: Value> extends Collection<OrderedSequence<any, any>>
       invariant(modified.length === 0);
       return [added, removed];
     });
-  }
-}
-
-export class SetLeafSequence<K: Value> extends OrderedSequence<K, K> {
-  getKey(idx: number): OrderedKey<any> {
-    return new OrderedKey(this.items[idx]);
-  }
-
-  getCompareFn(other: OrderedSequence<any, any>): EqualsFn {
-    return (idx: number, otherIdx: number) =>
-      equals(this.items[idx], other.items[otherIdx]);
-  }
-
-  get chunks(): Array<Ref<any>> {
-    return getValueChunks(this.items);
   }
 }

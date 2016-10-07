@@ -7,30 +7,26 @@
 import * as Bytes from './bytes.js';
 import Collection from './collection.js';
 import RollingValueHasher from './rolling-value-hasher.js';
-import {default as SequenceChunker, chunkSequence} from './sequence-chunker.js';
-import type {EqualsFn} from './edit-distance.js';
+import SequenceChunker, {chunkSequence} from './sequence-chunker.js';
 import type {ValueReader, ValueReadWriter} from './value-store.js';
 import type {makeChunkFn} from './sequence-chunker.js';
-import {IndexedSequence} from './indexed-sequence.js';
 import {Kind} from './noms-kind.js';
 import {OrderedKey, newIndexedMetaSequenceChunkFn} from './meta-sequence.js';
-import {SequenceCursor} from './sequence.js';
-import {blobType} from './type.js';
+import type {Sequence} from './sequence.js';
+import type SequenceCursor from './sequence-cursor.js';
+import {newCursorAtIndex} from './sequence-cursor.js';
 import {invariant} from './assert.js';
 import {hashValueByte} from './rolling-value-hasher.js';
+import {newBlobLeafSequence} from './blob-leaf-sequence.js';
 
-export default class Blob extends Collection<IndexedSequence<any>> {
+export default class Blob extends Collection<number, any> {
   constructor(bytes: Uint8Array) {
     const chunker = new SequenceChunker(null, null, null, newBlobLeafChunkFn(null),
         newIndexedMetaSequenceChunkFn(Kind.Blob, null), blobHashValueBytes);
-
     for (let i = 0; i < bytes.length; i++) {
       chunker.append(bytes[i]);
     }
-
-    const seq = chunker.doneSync();
-    invariant(seq instanceof IndexedSequence);
-    super(seq);
+    super(chunker.doneSync());
   }
 
   getReader(): BlobReader {
@@ -42,8 +38,8 @@ export default class Blob extends Collection<IndexedSequence<any>> {
   }
 
   splice(idx: number, deleteCount: number, insert: Uint8Array): Promise<Blob> {
-    const vr = this.sequence.vr;
-    return this.sequence.newCursorAt(idx).then(cursor =>
+    const vr = this.sequence.valueReader;
+    return newCursorAtIndex(this.sequence, idx).then(cursor =>
       chunkSequence(cursor, vr, Array.from(insert), deleteCount, newBlobLeafChunkFn(vr),
                     newIndexedMetaSequenceChunkFn(Kind.Blob, vr, null),
                     hashValueByte)).then(s => Blob.fromSequence(s));
@@ -51,14 +47,14 @@ export default class Blob extends Collection<IndexedSequence<any>> {
 }
 
 export class BlobReader {
-  _sequence: IndexedSequence<any>;
-  _cursor: Promise<SequenceCursor<number, IndexedSequence<number>>>;
+  _sequence: Sequence<number, number>;
+  _cursor: Promise<SequenceCursor<number, number>>;
   _pos: number;
   _lock: string;
 
-  constructor(sequence: IndexedSequence<any>) {
+  constructor(sequence: Sequence<number, number>) {
     this._sequence = sequence;
-    this._cursor = sequence.newCursorAt(0);
+    this._cursor = newCursorAtIndex(sequence, 0);
     this._pos = 0;
     this._lock = '';
   }
@@ -83,7 +79,7 @@ export class BlobReader {
     });
   }
 
-  _readCur(cur: SequenceCursor<any, any>): Promise<Uint8Array> {
+  _readCur(cur: SequenceCursor<number, number>): Promise<Uint8Array> {
     let arr = cur.sequence.items;
     invariant(arr instanceof Uint8Array);
 
@@ -94,7 +90,9 @@ export class BlobReader {
     }
 
     return cur.advanceChunk().then(() => {
+      // $FlowIssue: Flow doesn't think arr is a Uint8Array.
       this._pos += arr.byteLength;
+      // $FlowIssue: Flow doesn't think arr is a Uint8Array.
       return arr;
     });
   }
@@ -129,7 +127,7 @@ export class BlobReader {
 
     invariant(abs >= 0, `cannot seek to negative position ${abs}`);
 
-    this._cursor = this._sequence.newCursorAt(abs);
+    this._cursor = newCursorAtIndex(this._sequence, abs);
 
     // Wait for the seek to complete so that reads will be relative to the new position.
     return this._cursor.then(() => {
@@ -140,25 +138,9 @@ export class BlobReader {
   }
 }
 
-export class BlobLeafSequence extends IndexedSequence<number> {
-  constructor(vr: ?ValueReader, items: Uint8Array) {
-    // $FlowIssue: The super class expects Array<T> but we sidestep that.
-    super(vr, blobType, items);
-  }
-
-  cumulativeNumberOfLeaves(idx: number): number {
-    return idx + 1;
-  }
-
-  getCompareFn(other: IndexedSequence<any>): EqualsFn {
-    return (idx: number, otherIdx: number) =>
-      this.items[idx] === other.items[otherIdx];
-  }
-}
-
-function newBlobLeafChunkFn(vr: ?ValueReader): makeChunkFn<any, any> {
-  return (items: Array<number>) => {
-    const blobLeaf = new BlobLeafSequence(vr, Bytes.fromValues(items));
+function newBlobLeafChunkFn(vr: ?ValueReader): makeChunkFn<number, number> {
+  return (items: number[]) => {
+    const blobLeaf = newBlobLeafSequence(vr, Bytes.fromValues(items));
     const blob = Blob.fromSequence(blobLeaf);
     const key = new OrderedKey(items.length);
     return [blob, key, items.length];
@@ -174,7 +156,7 @@ type BlobWriterState = 'writable' | 'closed';
 export class BlobWriter {
   _state: BlobWriterState;
   _blob: ?Promise<Blob>;
-  _chunker: SequenceChunker<any, any>;
+  _chunker: SequenceChunker<number, number>;
   _vrw: ?ValueReadWriter;
 
   constructor(vrw: ?ValueReadWriter) {

@@ -6,37 +6,84 @@
 
 import {suite, test} from 'mocha';
 import {assert} from 'chai';
-import Sequence, {SequenceCursor} from './sequence.js';
+import SequenceCursor, {newCursorAtIndex} from './sequence-cursor.js';
 import {notNull} from './assert.js';
-import {makeListType, valueType} from './type.js';
+import type {Type} from './type.js';
+import {makeListType, numberType} from './type.js';
+import LeafSequence from './leaf-sequence.js';
+import type {ValueReader} from './value-store.js';
+import type {Sequence} from './sequence.js';
+import type {EqualsFn} from './edit-distance.js';
+import type Ref from './ref.js';
 
-class TestSequence extends Sequence<any> {
-  constructor(items: Array<any>) {
-    super(null, makeListType(valueType), items);
+class NumberSequence {
+  _items: (number[])[];
+
+  constructor(items: (number[])[]) {
+    this._items = items;
   }
 
-  getChildSequence(idx: number): Promise<?Sequence<any>> {
-    return Promise.resolve(new TestSequence(this.items[idx]));
+  get type(): Type<any> {
+    return makeListType(numberType);
   }
-}
 
-class TestSequenceCursor extends SequenceCursor<any, TestSequence> {
-  clone(): TestSequenceCursor {
-    return new TestSequenceCursor(this.parent ? this.parent.clone() : null, this.sequence,
-                                  this.idx);
+  get items(): (number[])[] {
+    return this._items;
+  }
+
+  get isMeta(): boolean {
+    return false;
+  }
+
+  get numLeaves(): number {
+    throw new Error('not implemented');
+  }
+
+  get valueReader(): ?ValueReader {
+    return null;
+  }
+
+  get chunks(): Ref<any>[] {
+    throw new Error('not implemented');
+  }
+
+  get length(): number {
+    return this._items.length;
+  }
+
+  getChildSequence(idx: number): Promise<?Sequence<number, number>> {
+    return Promise.resolve(this.getChildSequenceSync(idx));
+  }
+
+  getChildSequenceSync(idx: number): ?Sequence<number, number> {
+    return new LeafSequence(null, this.type, this._items[idx]);
+  }
+
+  getEqualsFn(other: Sequence<any, any>): EqualsFn { // eslint-disable-line
+    throw new Error('not implemented');
+  }
+
+  range(start: number, end: number): Promise<number[]> { // eslint-disable-line
+    throw new Error('not implemented');
+  }
+
+  cumulativeNumberOfLeaves(idx: number): number { // eslint-disable-line
+    throw new Error('not implemented');
+  }
+
+  getKey(idx: number): any { // eslint-disable-line
+    throw new Error('not implemented');
   }
 }
 
 suite('SequenceCursor', () => {
-  function testCursor(data: Array<any>): TestSequenceCursor {
-    const s1 = new TestSequence(data);
-    const c1 = new TestSequenceCursor(null, s1, 0);
-    const s2 = new TestSequence(data[0]);
-    return new TestSequenceCursor(c1, s2, 0);
+  function testCursor(data: (number[])[]): Promise<SequenceCursor<number, any>> {
+    const seq = new NumberSequence(data);
+    return newCursorAtIndex(seq, 0);
   }
 
-  function expect(c: TestSequenceCursor, expectIdx: number,
-      expectParentIdx: number, expectValid: boolean, expectVal: ?number) {
+  function expect(c: SequenceCursor<number, any>, expectIdx: number,
+                  expectParentIdx: number, expectValid: boolean, expectVal: ?number) {
     assert.strictEqual(expectIdx, c.indexInChunk, 'indexInChunk');
     const parent = notNull(c.parent);
     assert.strictEqual(expectParentIdx, parent.indexInChunk, 'parentIdx');
@@ -49,7 +96,7 @@ suite('SequenceCursor', () => {
   }
 
   test('retreating past the start', async () => {
-    const cur = testCursor([[100, 101],[102]]);
+    const cur = await testCursor([[100, 101],[102]]);
     expect(cur, 0, 0, true, 100);
     assert.isFalse(await cur.retreat());
     expect(cur, -1, 0, false, null);
@@ -58,7 +105,7 @@ suite('SequenceCursor', () => {
   });
 
   test('retreating past the start, then advanding past the end', async () => {
-    const cur = testCursor([[100, 101],[102]]);
+    const cur = await testCursor([[100, 101],[102]]);
     assert.isFalse(await cur.retreat());
     assert.isTrue(await cur.advance());
     expect(cur, 0, 0, true, 100);
@@ -73,7 +120,7 @@ suite('SequenceCursor', () => {
   });
 
   test('advancing past the end', async () => {
-    const cur = testCursor([[100, 101],[102]]);
+    const cur = await testCursor([[100, 101],[102]]);
     assert.isTrue(await cur.advance());
     expect(cur, 1, 0, true, 101);
     assert.isTrue(await cur.retreat());
@@ -85,7 +132,7 @@ suite('SequenceCursor', () => {
   });
 
   test('advancing past the end, then retreating past the start.', async () => {
-    const cur = testCursor([[100, 101],[102]]);
+    const cur = await testCursor([[100, 101],[102]]);
     assert.isTrue(await cur.advance());
     assert.isTrue(await cur.advance());
     expect(cur, 0, 1, true, 102);

@@ -5,8 +5,11 @@
 // @flow
 
 import {invariant} from './assert.js';
-import {OrderedSequence, OrderedSequenceCursor} from './ordered-sequence.js';
-import {SequenceCursor} from './sequence.js';
+import {Sequence} from './sequence.js';
+import {
+  newCursorAtKey,
+} from './ordered-sequence.js';
+import SequenceCursor from './sequence-cursor.js';
 import type Value from './value.js'; // eslint-disable-line no-unused-vars
 
 // TODO: Expose an iteration API.
@@ -14,20 +17,23 @@ import type Value from './value.js'; // eslint-disable-line no-unused-vars
 /**
  * Returns a 3-tuple [added, removed, modified] sorted keys.
  */
-export default async function diff<K: Value, T>(
-    last: OrderedSequence<K, T>, current: OrderedSequence<K, T>): Promise<[K[], K[], K[]]> {
+export default async function diff<T, K: Value>(
+    last: Sequence<T, K>, current: Sequence<T, K>): Promise<[K[], K[], K[]]> {
   // TODO: Construct the cursor at exactly the right position. There is no point reading in the
   // first chunk of each sequence if we're not going to use them. This needs for chunks (or at
   // least meta chunks) to encode their height.
   // See https://github.com/attic-labs/noms/issues/1219.
-  const [lastCur, currentCur] = await Promise.all([last.newCursorAt(), current.newCursorAt()]);
+  const [lastCur, currentCur] = await Promise.all([
+    newCursorAtKey(last, null),
+    newCursorAtKey(current, null),
+  ]);
   const [added, removed, modified] = [[], [], []];
 
   while (lastCur.valid && currentCur.valid) {
     await fastForward(lastCur, currentCur);
 
     while (lastCur.valid && currentCur.valid &&
-           !lastCur.sequence.getCompareFn(currentCur.sequence)(lastCur.idx, currentCur.idx)) {
+           !lastCur.sequence.getEqualsFn(currentCur.sequence)(lastCur.idx, currentCur.idx)) {
       const lastKey = lastCur.getCurrentKey(), currentKey = currentCur.getCurrentKey();
       const compare = currentKey.compare(lastKey);
       if (compare < 0) {
@@ -56,7 +62,7 @@ export default async function diff<K: Value, T>(
 /**
  * Advances |a| and |b| past their common sequence of equal values.
  */
-export function fastForward(a: OrderedSequenceCursor<any, any>, b: OrderedSequenceCursor<any, any>)
+export function fastForward<T, K: Value>(a: SequenceCursor<T, K>, b: SequenceCursor<T, K>)
     : Promise<void> {
   return a.valid && b.valid ? doFastForward(true, a, b).then() : Promise.resolve();
 }
@@ -64,8 +70,9 @@ export function fastForward(a: OrderedSequenceCursor<any, any>, b: OrderedSequen
 /*
  * Returns an array matching |a| and |b| respectively to whether that cursor has more values.
  */
-async function doFastForward(allowPastEnd: boolean, a: OrderedSequenceCursor<any, any>,
-    b: OrderedSequenceCursor<any, any>): Promise<[boolean, boolean]> {
+async function doFastForward<T, K: Value>(
+    allowPastEnd: boolean, a: SequenceCursor<T, K>, b: SequenceCursor<T, K>)
+    : Promise<[boolean, boolean]> {
   invariant(a.valid && b.valid);
   let aHasMore = true, bHasMore = true;
 
@@ -75,8 +82,8 @@ async function doFastForward(allowPastEnd: boolean, a: OrderedSequenceCursor<any
     if (aParent && bParent && isCurrentEqual(aParent, bParent)) {
       // Key optimisation: if the sequences have common parents, then entire chunks can be
       // fast-forwarded without reading unnecessary data.
-      invariant(aParent instanceof OrderedSequenceCursor);
-      invariant(bParent instanceof OrderedSequenceCursor);
+      invariant(aParent instanceof SequenceCursor);
+      invariant(bParent instanceof SequenceCursor);
       [aHasMore, bHasMore] = await doFastForward(false, aParent, bParent);
 
       const syncWithIdx = (cur, hasMore) => cur.sync().then(() => {
@@ -106,6 +113,6 @@ async function doFastForward(allowPastEnd: boolean, a: OrderedSequenceCursor<any
   return [aHasMore, bHasMore];
 }
 
-function isCurrentEqual(a: SequenceCursor<any, any>, b: SequenceCursor<any, any>): boolean {
-  return a.sequence.getCompareFn(b.sequence)(a.idx, b.idx);
+function isCurrentEqual<T, K: Value>(a: SequenceCursor<T, K>, b: SequenceCursor<T, K>): boolean {
+  return a.sequence.getEqualsFn(b.sequence)(a.idx, b.idx);
 }

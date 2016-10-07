@@ -4,17 +4,17 @@
 
 // @flow
 
-import Ref from './ref.js';
-import type Sequence from './sequence.js'; // eslint-disable-line no-unused-vars
+import type Ref from './ref.js';
+import type {Sequence} from './sequence.js';
 import type {Type} from './type.js';
-import {ValueBase} from './value.js';
+import {ValueBase, init as initValueBase} from './value.js';
+import type Value from './value.js';
 import {invariant} from './assert.js';
-import {init as initValueBase} from './value.js';
 
-export default class Collection<S: Sequence<any>> extends ValueBase {
-  sequence: S;
+export default class Collection<T, K: Value> extends ValueBase {
+  sequence: Sequence<T, K>;
 
-  constructor(sequence: S) {
+  constructor(sequence: Sequence<T, K>) {
     super();
     this.sequence = sequence;
   }
@@ -27,14 +27,15 @@ export default class Collection<S: Sequence<any>> extends ValueBase {
     return !this.sequence.isMeta && this.sequence.items.length === 0;
   }
 
-  get chunks(): Array<Ref<any>> {
+  get chunks(): Ref<any>[] {
     return this.sequence.chunks;
   }
 
   /**
-   * Creates a new Collection from a sequence.
+   * Creates a new Collection of the type fromSequence is called on.
    */
-  static fromSequence<T: Collection<any>, S: Sequence<any>>(s: S): T {
+  static fromSequence<T, K>(s: Sequence<T, K>): any {
+    // NOTE: returning "any" so that callers don't need to put invariants everywhere.
     const col = Object.create(this.prototype);
     invariant(col instanceof this);
     initValueBase(col);

@@ -4,7 +4,8 @@
 
 // @flow
 
-import Blob, {BlobLeafSequence} from './blob.js';
+import Blob from './blob.js';
+import BlobLeafSequence, {newBlobLeafSequence} from './blob-leaf-sequence.js';
 import Ref, {constructRef} from './ref.js';
 import {newStructWithType} from './struct.js';
 import type Struct from './struct.js';
@@ -17,10 +18,13 @@ import {
 import {OrderedKey, MetaTuple} from './meta-sequence.js';
 import {invariant, notNull} from './assert.js';
 import {isPrimitiveKind, kindToString, Kind} from './noms-kind.js';
-import List, {ListLeafSequence} from './list.js';
-import Map, {MapLeafSequence} from './map.js';
-import Set, {SetLeafSequence} from './set.js';
-import {IndexedMetaSequence, OrderedMetaSequence} from './meta-sequence.js';
+import List from './list.js';
+import ListLeafSequence from './list-leaf-sequence.js';
+import Map from './map.js';
+import MapLeafSequence from './map-leaf-sequence.js';
+import MetaSequence from './meta-sequence.js';
+import Set from './set.js';
+import SetLeafSequence from './set-leaf-sequence.js';
 import type Value from './value.js';
 import type {ValueReader} from './value-store.js';
 import type {NomsReader} from './codec.js';
@@ -79,10 +83,10 @@ export default class ValueDecoder {
 
   readBlobLeafSequence(): BlobLeafSequence {
     const bytes = this._r.readBytes();
-    return new BlobLeafSequence(this._ds, bytes);
+    return newBlobLeafSequence(this._ds, bytes);
   }
 
-  readValueSequence(): Array<Value> {
+  readValueSequence(): Value[] {
     const count = this._r.readUint32();
     const list = [];
     for (let i = 0; i < count; i++) {
@@ -115,10 +119,10 @@ export default class ValueDecoder {
     return new MapLeafSequence(this._ds, t, data);
   }
 
-  readMetaSequence(): Array<MetaTuple<any>> {
+  readMetaSequence(): MetaTuple<any, any>[] {
     const count = this._r.readUint32();
 
-    const data: Array<MetaTuple<any>> = [];
+    const data: MetaTuple<any, any>[] = [];
     for (let i = 0; i < count; i++) {
       const ref = this.readValue();
       const v = this.readValue();
@@ -130,12 +134,8 @@ export default class ValueDecoder {
     return data;
   }
 
-  readIndexedMetaSequence(t: Type<any>): IndexedMetaSequence {
-    return new IndexedMetaSequence(this._ds, t, this.readMetaSequence());
-  }
-
-  readOrderedMetaSequence(t: Type<any>): OrderedMetaSequence<any> {
-    return new OrderedMetaSequence(this._ds, t, this.readMetaSequence());
+  newMetaSequence(t: Type<any>): MetaSequence<any, any> {
+    return new MetaSequence(this._ds, t, this.readMetaSequence());
   }
 
   readValue(): any {
@@ -144,7 +144,7 @@ export default class ValueDecoder {
       case Kind.Blob: {
         const isMeta = this._r.readBool();
         if (isMeta) {
-          return Blob.fromSequence(this.readIndexedMetaSequence(t));
+          return Blob.fromSequence(this.newMetaSequence(t));
         }
 
         return Blob.fromSequence(this.readBlobLeafSequence());
@@ -158,14 +158,14 @@ export default class ValueDecoder {
       case Kind.List: {
         const isMeta = this._r.readBool();
         if (isMeta) {
-          return List.fromSequence(this.readIndexedMetaSequence(t));
+          return List.fromSequence(this.newMetaSequence(t));
         }
         return List.fromSequence(this.readListLeafSequence(t));
       }
       case Kind.Map: {
         const isMeta = this._r.readBool();
         if (isMeta) {
-          return Map.fromSequence(this.readOrderedMetaSequence(t));
+          return Map.fromSequence(this.newMetaSequence(t));
         }
         return Map.fromSequence(this.readMapLeafSequence(t));
       }
@@ -174,7 +174,7 @@ export default class ValueDecoder {
       case Kind.Set: {
         const isMeta = this._r.readBool();
         if (isMeta) {
-          return Set.fromSequence(this.readOrderedMetaSequence(t));
+          return Set.fromSequence(this.newMetaSequence(t));
         }
         return Set.fromSequence(this.readSetLeafSequence(t));
       }

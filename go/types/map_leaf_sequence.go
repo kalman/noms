@@ -71,12 +71,3 @@ func (ml mapLeafSequence) getCompareFn(other sequence) compareFn {
 func (ml mapLeafSequence) getKey(idx int) orderedKey {
 	return newOrderedKey(ml.data[idx].key)
 }
-
-// Collection interface
-func (ml mapLeafSequence) Len() uint64 {
-	return uint64(len(ml.data))
-}
-
-func (ml mapLeafSequence) Empty() bool {
-	return ml.Len() == uint64(0)
-}

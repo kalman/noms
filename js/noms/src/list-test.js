@@ -7,7 +7,8 @@
 import {assert} from 'chai';
 import {suite, setup, teardown, test} from 'mocha';
 
-import List, {ListWriter, ListLeafSequence, newListLeafSequence} from './list.js';
+import List, {ListWriter} from './list.js';
+import ListLeafSequence, {newListLeafSequence} from './list-leaf-sequence.js';
 import Ref from './ref.js';
 import {OrderedKey, MetaTuple, newListMetaSequence} from './meta-sequence.js';
 import {DEFAULT_MAX_SPLICE_MATRIX_SIZE, calcSplices} from './edit-distance.js';
@@ -35,7 +36,7 @@ import {
   testRoundTripAndValidate,
 } from './test-util.js';
 import {TestDatabase} from './test-util.js';
-import {IndexedMetaSequence} from './meta-sequence.js';
+import MetaSequence from './meta-sequence.js';
 
 const testListSize = 5000;
 const listOfNRef = 'tqpbqlu036sosdq9kg3lka7sjaklgslg';
@@ -329,6 +330,7 @@ suite('CompoundList', () => {
     const l = List.fromSequence(newListMetaSequence(db, [
       new MetaTuple(rm1, new OrderedKey(4), 4, null),
       new MetaTuple(rm2, new OrderedKey(4), 4, null)]));
+    invariant(l instanceof List);
     return l;
   }
 
@@ -603,6 +605,7 @@ suite('Diff List', () => {
     // [1, 2, 3][4, 5, 6, 7, 8][9, 10, 11, 12, 13, 14, 15]
     const l2 = List.fromSequence(newListMetaSequence(null, [m1, m2, m3]));
 
+    invariant(l1 instanceof List && l2 instanceof List);
     const listDiff = await l2.diff(l1);
     assert.deepEqual(listDiff, [
       [3,0,5,3],
@@ -717,6 +720,6 @@ suite('ListWriter', () => {
     }
 
     await t(15, ListLeafSequence);
-    await t(1500, IndexedMetaSequence);
+    await t(1500, MetaSequence);
   });
 });

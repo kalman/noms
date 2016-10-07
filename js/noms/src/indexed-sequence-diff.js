@@ -7,17 +7,18 @@
 import type {Splice} from './edit-distance.js';
 import {calcSplices, SPLICE_ADDED, SPLICE_AT, SPLICE_FROM,
   SPLICE_REMOVED} from './edit-distance.js';
-import {IndexedMetaSequence} from './meta-sequence.js';
+import MetaSequence from './meta-sequence.js';
 import {invariant} from './assert.js';
-import type {IndexedSequence} from './indexed-sequence.js';
+import type {Sequence} from './sequence.js';
+import type Value from './value.js';
 
-export function diff(last: IndexedSequence<any>, lastHeight: number, lastOffset: number,
-                     current: IndexedSequence<any>, currentHeight: number, currentOffset: number,
-                     maxSpliceMatrixSize: number): Promise<Array<Splice>> {
-
+export function diff<T, K: Value>(
+    last: Sequence<T, K>, lastHeight: number, lastOffset: number,
+    current: Sequence<T, K>, currentHeight: number, currentOffset: number,
+    maxSpliceMatrixSize: number): Promise<Array<Splice>> {
   if (lastHeight > currentHeight) {
     invariant(lastOffset === 0 && currentOffset === 0);
-    invariant(last instanceof IndexedMetaSequence);
+    invariant(last instanceof MetaSequence);
     return last.getCompositeChildSequence(0, last.length).then(lastChild =>
         diff(lastChild, lastHeight - 1, lastOffset, current, currentHeight, currentOffset,
              maxSpliceMatrixSize));
@@ -25,7 +26,7 @@ export function diff(last: IndexedSequence<any>, lastHeight: number, lastOffset:
 
   if (currentHeight > lastHeight) {
     invariant(lastOffset === 0 && currentOffset === 0);
-    invariant(current instanceof IndexedMetaSequence);
+    invariant(current instanceof MetaSequence);
     return current.getCompositeChildSequence(0, current.length).then(currentChild =>
         diff(last, lastHeight, lastOffset, currentChild, currentHeight - 1, currentOffset,
              maxSpliceMatrixSize));
@@ -35,7 +36,7 @@ export function diff(last: IndexedSequence<any>, lastHeight: number, lastOffset:
   invariant(lastHeight === currentHeight);
 
   const splices = calcSplices(last.length, current.length, maxSpliceMatrixSize,
-    last.getCompareFn(current));
+    last.getEqualsFn(current));
 
   const splicesP = splices.map(splice => {
     if (!last.isMeta) {
@@ -82,7 +83,7 @@ export function diff(last: IndexedSequence<any>, lastHeight: number, lastOffset:
     }
 
     // Meta sequence splice which includes removed & added sub-sequences. Must recurse down.
-    invariant(last instanceof IndexedMetaSequence && current instanceof IndexedMetaSequence);
+    invariant(last instanceof MetaSequence && current instanceof MetaSequence);
     const lastChildP = last.getCompositeChildSequence(splice[SPLICE_AT], splice[SPLICE_REMOVED]);
     const currentChildP = current.getCompositeChildSequence(splice[SPLICE_FROM],
       splice[SPLICE_ADDED]);
@@ -97,9 +98,8 @@ export function diff(last: IndexedSequence<any>, lastHeight: number, lastOffset:
     }
 
     return Promise.all([lastChildP, currentChildP]).then(childSequences =>
-      diff(childSequences[0], lastHeight - 1, lastChildOffset, childSequences[1],
-           currentHeight - 1,
-           currentChildOffset,
+      diff(childSequences[0], lastHeight - 1, lastChildOffset,
+           childSequences[1], currentHeight - 1, currentChildOffset,
            maxSpliceMatrixSize));
   });
 

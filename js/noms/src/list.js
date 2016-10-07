@@ -11,23 +11,22 @@ import type Value from './value.js'; // eslint-disable-line no-unused-vars
 import type {AsyncIterator} from './async-iterator.js';
 import {default as SequenceChunker, chunkSequence, chunkSequenceSync} from './sequence-chunker.js';
 import Collection from './collection.js';
-import {IndexedSequence, IndexedSequenceIterator} from './indexed-sequence.js';
 import {diff} from './indexed-sequence-diff.js';
 import {invariant} from './assert.js';
 import {
   OrderedKey,
   newIndexedMetaSequenceChunkFn,
 } from './meta-sequence.js';
-import Ref from './ref.js';
-import {getValueChunks} from './sequence.js';
-import {makeListType, makeUnionType, getTypeOfValue} from './type.js';
+import {newCursorAtIndex} from './sequence-cursor.js';
+import SequenceIterator from './sequence-iterator.js';
 import {equals} from './compare.js';
 import {Kind} from './noms-kind.js';
 import {DEFAULT_MAX_SPLICE_MATRIX_SIZE} from './edit-distance.js';
 import {hashValueBytes} from './rolling-value-hasher.js';
+import {newListLeafSequence} from './list-leaf-sequence.js';
 
-function newListLeafChunkFn<T: Value>(vr: ?ValueReader): makeChunkFn<any, any> {
-  return (items: Array<T>) => {
+function newListLeafChunkFn<T: Value>(vr: ?ValueReader): makeChunkFn<T, any> {
+  return (items: T[]) => {
     const seq = newListLeafSequence(vr, items);
     const list = List.fromSequence(seq);
     const key = new OrderedKey(items.length);
@@ -46,15 +45,13 @@ function newListLeafChunkFn<T: Value>(vr: ?ValueReader): makeChunkFn<any, any> {
  *
  * Lists, like all Noms values are immutable so the "mutation" methods return a new list.
  */
-export default class List<T: Value> extends Collection<IndexedSequence<any>> {
-  constructor(values: Array<T> = []) {
-    const seq = chunkSequenceSync(
+export default class List<T: Value> extends Collection<T, any> {
+  constructor(values: T[] = []) {
+    super(chunkSequenceSync(
         values,
         newListLeafChunkFn(null),
         newIndexedMetaSequenceChunkFn(Kind.List, null, null),
-        hashValueBytes);
-    invariant(seq instanceof IndexedSequence);
-    super(seq);
+        hashValueBytes));
   }
 
   /**
@@ -63,16 +60,16 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
    */
   async get(idx: number): Promise<T> {
     invariant(idx >= 0 && idx < this.length);
-    return this.sequence.newCursorAt(idx).then(cursor => cursor.getCurrent());
+    return newCursorAtIndex(this.sequence, idx).then(cursor => cursor.getCurrent());
   }
 
   /**
    * Splice returns a new list where `deleteCount` values have been removed at `idx` and the values
    * `insert` have been inserted instead.
    */
-  splice(idx: number, deleteCount: number, ...insert: Array<T>): Promise<List<T>> {
-    const vr = this.sequence.vr;
-    return this.sequence.newCursorAt(idx).then(cursor =>
+  splice(idx: number, deleteCount: number, ...insert: T[]): Promise<List<T>> {
+    const vr = this.sequence.valueReader;
+    return newCursorAtIndex(this.sequence, idx).then(cursor =>
       chunkSequence(cursor, vr, insert, deleteCount, newListLeafChunkFn(vr),
                     newIndexedMetaSequenceChunkFn(Kind.List, vr, null),
                     hashValueBytes)).then(s => List.fromSequence(s));
@@ -81,7 +78,7 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
   /**
    * Insert returns a new list where `values` have been inserted at `idx`.
    */
-  insert(idx: number, ...values: Array<T>): Promise<List<T>> {
+  insert(idx: number, ...values: T[]): Promise<List<T>> {
     return this.splice(idx, 0, ...values);
   }
 
@@ -95,7 +92,7 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
   /**
    * This returns a new list where `values` have been appended to the resulting list.
    */
-  append(...values: Array<T>): Promise<List<T>> {
+  append(...values: T[]): Promise<List<T>> {
     return this.splice(this.length, 0, ...values);
   }
 
@@ -106,7 +103,7 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
    * promises have been fulfilled.
    */
   async forEach(cb: (v: T, i: number) => ?Promise<any>): Promise<void> {
-    const cursor = await this.sequence.newCursorAt(0);
+    const cursor = await newCursorAtIndex(this.sequence, 0);
     const promises = [];
     return cursor.iter((v, i) => {
       promises.push(cb(v, i));
@@ -118,14 +115,14 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
    * Returns a new `AsyncIterator` which can be used to iterate over the list.
    */
   iterator(): AsyncIterator<T> {
-    return new IndexedSequenceIterator(this.sequence.newCursorAt(0));
+    return new SequenceIterator(newCursorAtIndex(this.sequence, 0));
   }
 
   /**
    * Returns a new `AsyncIterator` starting at `i` which can be used to iterate over the list.
    */
   iteratorAt(i: number): AsyncIterator<T> {
-    return new IndexedSequenceIterator(this.sequence.newCursorAt(i));
+    return new SequenceIterator(newCursorAtIndex(this.sequence, i));
   }
 
   /**
@@ -134,7 +131,7 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
    * the thing changed.
    */
   diff(last: List<T>,
-       maxSpliceMatrixSize: number = DEFAULT_MAX_SPLICE_MATRIX_SIZE): Promise<Array<Splice>> {
+       maxSpliceMatrixSize: number = DEFAULT_MAX_SPLICE_MATRIX_SIZE): Promise<Splice[]> {
     invariant(equals(this.type, last.type));
 
     if (equals(this, last)) {
@@ -147,7 +144,8 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
       return Promise.resolve([[0, 0, this.length, 0]]); // Everything added
     }
 
-    return Promise.all([last.sequence.newCursorAt(0), this.sequence.newCursorAt(0)]).then(cursors =>
+    const cursorPromises = [newCursorAtIndex(last.sequence, 0), newCursorAtIndex(this.sequence, 0)];
+    return Promise.all(cursorPromises).then(cursors =>
         diff(last.sequence, cursors[0].depth, 0, this.sequence, cursors[1].depth, 0,
              maxSpliceMatrixSize));
   }
@@ -156,7 +154,7 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
    * Returns a new JS array with the same values as list.
    */
   // $FlowIssue: Flow doesn't understand this in default param expressions.
-  toJS(start: number = 0, end: number = this.length): Promise<Array<T>> {
+  toJS(start: number = 0, end: number = this.length): Promise<T[]> {
     const l = this.length;
     start = clampIndex(start, l);
     end = clampIndex(end, l);
@@ -172,36 +170,6 @@ export default class List<T: Value> extends Collection<IndexedSequence<any>> {
   get length(): number {
     return this.sequence.numLeaves;
   }
-}
-
-/**
- * ListLeafSequence is used for the leaf lists of a list prolly-tree.
- */
-export class ListLeafSequence<T: Value> extends IndexedSequence<T> {
-  get chunks(): Array<Ref<any>> {
-    return getValueChunks(this.items);
-  }
-
-  /**
-   * This method is for internal use of sequences. It returns how many leaf items there are up to an
-   * index within its sequence.
-   */
-  cumulativeNumberOfLeaves(idx: number): number {
-    return idx + 1;
-  }
-
-  /**
-   * Returns an array of the values in the list.
-   */
-  range(start: number, end: number): Promise<Array<T>> {
-    invariant(start >= 0 && end >= 0 && end <= this.items.length);
-    return Promise.resolve(this.items.slice(start, end));
-  }
-}
-
-export function newListLeafSequence<T: Value>(vr: ?ValueReader, items: T[]): ListLeafSequence<T> {
-  const t = makeListType(makeUnionType(items.map(getTypeOfValue)));
-  return new ListLeafSequence(vr, t, items);
 }
 
 function clampIndex(idx: number, length: number): number {
@@ -220,7 +188,7 @@ type ListWriterState = 'writable' | 'closed';
 export class ListWriter<T: Value> {
   _state: ListWriterState;
   _list: ?Promise<List<T>>;
-  _chunker: SequenceChunker<T, ListLeafSequence<T>>;
+  _chunker: SequenceChunker<T, number>;
   _vrw: ?ValueReadWriter;
 
   /**
@@ -254,7 +222,7 @@ export class ListWriter<T: Value> {
    * Gets a promise to the list we are creating. Make sure you call `close` before trying to get
    * the list.
    */
-  get list(): Promise<List<any>> {
+  get list(): Promise<List<T>> {
     assert(this._state === 'closed');
     invariant(this._list);
     return this._list;

@@ -8,7 +8,7 @@ import {compare} from './compare.js';
 import Hash from './hash.js';
 import type {makeChunkFn} from './sequence-chunker.js';
 import type {ValueReader} from './value-store.js';
-import type Value from './value.js'; // eslint-disable-line no-unused-vars
+import type Value from './value.js';
 import {ValueBase} from './value.js';
 import Collection from './collection.js';
 import type {Type} from './type.js';
@@ -22,69 +22,71 @@ import {
   makeUnionType,
   valueType,
 } from './type.js';
-import {IndexedSequence} from './indexed-sequence.js';
 import {invariant, notNull} from './assert.js';
-import {OrderedSequence} from './ordered-sequence.js';
 import Ref, {constructRef} from './ref.js';
-import Sequence from './sequence.js';
+import type {Sequence} from './sequence.js';
 import {Kind} from './noms-kind.js';
 import type {NomsKind} from './noms-kind.js';
-import List, {ListLeafSequence} from './list.js';
+import List from './list.js';
+import ListLeafSequence from './list-leaf-sequence.js';
 import Map from './map.js';
 import Set from './set.js';
 import Blob from './blob.js';
 import type {EqualsFn} from './edit-distance.js';
 import {hashValueBytes} from './rolling-value-hasher.js';
 import RollingValueHasher from './rolling-value-hasher.js';
+import LeafSequence from './leaf-sequence.js';
 
-export type MetaSequence<T: Value> = Sequence<MetaTuple<T>>;
-
-export class MetaTuple<T: Value> {
+/**
+ * TODO: docs, what is T/K
+ */
+export class MetaTuple<T, K: Value> {
   ref: Ref<any>;
-  key: OrderedKey<T>;
+  key: OrderedKey<K>;
   numLeaves: number;
-  child: ?Collection<any>;
+  child: ?Collection<T, K>;
 
-  constructor(ref: Ref<any>, key: OrderedKey<T>, numLeaves: number, child: ?Collection<any>) {
+  constructor(ref: Ref<any>, key: OrderedKey<K>, numLeaves: number, child: ?Collection<T, K>) {
     this.ref = ref;
     this.key = key;
     this.numLeaves = numLeaves;
     this.child = child;
   }
 
-  getChildSequence(vr: ?ValueReader): Promise<Sequence<any>> {
+  getChildSequence(vr: ?ValueReader): Promise<Sequence<T, K>> {
     return this.child ?
         Promise.resolve(this.child.sequence) :
-        notNull(vr).readValue(this.ref.targetHash).then((c: Collection<any>) => {
+        notNull(vr).readValue(this.ref.targetHash).then((c: Collection<T, K>) => {
           invariant(c, () => `Could not read sequence ${this.ref.targetHash.toString()}`);
           return c.sequence;
         });
   }
 
-  getChildSequenceSync(): Sequence<any> {
+  getChildSequenceSync(): Sequence<T, K> {
     return notNull(this.child).sequence;
   }
 }
 
-export function metaHashValueBytes(tuple: MetaTuple<any>, rv: RollingValueHasher) {
+export function metaHashValueBytes<T, K: Value>(tuple: MetaTuple<T, K>, rv: RollingValueHasher) {
   let val = tuple.key.v;
   if (!tuple.key.isOrderedByValue) {
     // See https://github.com/attic-labs/noms/issues/1688#issuecomment-227528987
     val = constructRef(makeRefType(boolType), notNull(tuple.key.h), 0);
   } else {
-    val = notNull(val);
+    invariant(val);
   }
 
   hashValueBytes(tuple.ref, rv);
   hashValueBytes(val, rv);
 }
 
-export class OrderedKey<T: Value> {
+// TODO: OrderedKey isn't really the best name and/or not the right place for this?
+export class OrderedKey<K: Value> {
   isOrderedByValue: boolean;
-  v: ?T;
+  v: ?K;
   h: ?Hash;
 
-  constructor(v: T) {
+  constructor(v: K) {
     this.v = v;
     if (v instanceof ValueBase) {
       this.isOrderedByValue = false;
@@ -103,7 +105,7 @@ export class OrderedKey<T: Value> {
     return k;
   }
 
-  value(): T {
+  value(): K {
     return notNull(this.v);
   }
 
@@ -126,32 +128,71 @@ export class OrderedKey<T: Value> {
   }
 }
 
-// The elemTypes of the collection inside the Ref<Collection<?, ?>>
-function getCollectionTypes(tuple: MetaTuple<any>): Type<any>[] {
+/**
+ * Returns the elemTypes of the collection inside the Ref<Collection<?, ?>>.
+ */
+function getCollectionTypes<T, K: Value>(tuple: MetaTuple<T, K>): Type<any>[] {
   return tuple.ref.type.desc.elemTypes[0].desc.elemTypes;
 }
 
-export function newListMetaSequence(vr: ?ValueReader, items: Array<MetaTuple<any>>)
-    : IndexedMetaSequence {
+export function newListMetaSequence<T: Value>(vr: ?ValueReader, items: MetaTuple<T, T>[])
+    : MetaSequence<T, T> {
   const t = makeListType(makeUnionType(items.map(tuple => getCollectionTypes(tuple)[0])));
-  return new IndexedMetaSequence(vr, t, items);
+  return new MetaSequence(vr, t, items);
 }
 
-export function newBlobMetaSequence(vr: ?ValueReader, items: Array<MetaTuple<any>>)
-    : IndexedMetaSequence {
-  return new IndexedMetaSequence(vr, blobType, items);
+export function newBlobMetaSequence(vr: ?ValueReader, items: MetaTuple<number, number>[])
+    : MetaSequence<number, number> {
+  return new MetaSequence(vr, blobType, items);
 }
 
-export class IndexedMetaSequence extends IndexedSequence<MetaTuple<any>> {
-  _offsets: Array<number>;
+export default class MetaSequence<T, K: Value> {
+  _vr: ?ValueReader;
+  _t: Type<any>;
+  _items: MetaTuple<T, K>[];
+  _offsets: number[];
 
-  constructor(vr: ?ValueReader, t: Type<any>, items: Array<MetaTuple<any>>) {
-    super(vr, t, items);
+  constructor(vr: ?ValueReader, t: Type<any>, items: MetaTuple<T, K>[]) {
+    this._vr = vr;
+    this._t = t;
+    this._items = items;
     let cum = 0;
-    this._offsets = this.items.map(i => {
-      cum += i.key.numberValue();
+    this._offsets = items.map(i => {
+      cum += i.numLeaves;
       return cum;
     });
+  }
+
+  /**
+   * Returns the sequences pointed to by all items[i], s.t. start <= i < end,
+   * and returns the concatentation as one long composite sequence
+   */
+  async getCompositeChildSequence(start: number, length: number): Promise<Sequence<T, K>> {
+    if (length === 0) {
+      return new EmptySequence();
+    }
+
+    const children = await Promise.all(this._items
+      .slice(start, start + length)
+      .map(item => item.getChildSequence(this._vr)));
+    const items = children.reduce((all, child) => all.concat(child.items), []);
+
+    if (!items[0].isMeta) {
+      // Assume that getCompositeChildSequence is only called on lists.
+      // $FlowIssue: doesn't know that T:Value if these are leaf sequences.
+      return new ListLeafSequence(this._vr, this.type, items);
+    }
+    return new MetaSequence(this._vr, this.type, items);
+  }
+
+  // Sequence implementation
+
+  get type(): Type<any> {
+    return this._t;
+  }
+
+  get items(): MetaTuple<T, K>[] {
+    return this._items;
   }
 
   get isMeta(): boolean {
@@ -162,11 +203,35 @@ export class IndexedMetaSequence extends IndexedSequence<MetaTuple<any>> {
     return this._offsets[this._offsets.length - 1];
   }
 
-  get chunks(): Array<Ref<any>> {
-    return getMetaSequenceChunks(this);
+  get valueReader(): ?ValueReader {
+    return this._vr;
   }
 
-  range(start: number, end: number): Promise<Array<any>> {
+  get chunks(): Ref<any>[] {
+    return this._items.map(mt => mt.ref);
+  }
+
+  get length(): number {
+    return this._items.length;
+  }
+
+  getChildSequence(idx: number): Promise<?Sequence<T, K>> {
+    const mt = this.items[idx];
+    return mt.getChildSequence(this._vr);
+  }
+
+  getChildSequenceSync(idx: number): ?Sequence<T, K> {
+    const mt = this.items[idx];
+    return mt.getChildSequenceSync();
+  }
+
+  getEqualsFn(other: Sequence<T, K>): EqualsFn {
+    invariant(other instanceof MetaSequence);
+    return (idx: number, otherIdx: number) =>
+      this.items[idx].ref.targetHash.equals(other.items[otherIdx].ref.targetHash);
+  }
+
+  range(start: number, end: number): Promise<T[]> {
     invariant(start >= 0 && end >= 0 && end >= start);
 
     const childRanges = [];
@@ -177,10 +242,8 @@ export class IndexedMetaSequence extends IndexedSequence<MetaTuple<any>> {
         const seqStart = cum - seqLength;
         const childStart = start - seqStart;
         const childEnd = Math.min(seqLength, end - seqStart);
-        childRanges.push(this.getChildSequence(i).then(child => {
-          invariant(child instanceof IndexedSequence);
-          return child.range(childStart, childEnd);
-        }));
+        childRanges.push(this.getChildSequence(i).then(
+          child => notNull(child).range(childStart, childEnd)));
         start += childEnd - childStart;
       }
     }
@@ -192,127 +255,36 @@ export class IndexedMetaSequence extends IndexedSequence<MetaTuple<any>> {
     });
   }
 
-  getChildSequence(idx: number): Promise<?Sequence<any>> {
-    if (!this.isMeta) {
-      return Promise.resolve(null);
-    }
-
-    const mt = this.items[idx];
-    return mt.getChildSequence(this.vr);
-  }
-
-  getChildSequenceSync(idx: number): ?Sequence<any> {
-    if (!this.isMeta) {
-      return null;
-    }
-
-    const mt = this.items[idx];
-    return mt.getChildSequenceSync();
-  }
-
-  // Returns the sequences pointed to by all items[i], s.t. start <= i < end, and returns the
-  // concatentation as one long composite sequence
-  getCompositeChildSequence(start: number, length: number): Promise<IndexedSequence<any>> {
-    if (length === 0) {
-      return Promise.resolve(new EmptySequence());
-    }
-
-    const childrenP = [];
-    for (let i = start; i < start + length; i++) {
-      childrenP.push(this.items[i].getChildSequence(this.vr));
-    }
-
-    return Promise.all(childrenP).then(children => {
-      const items = [];
-      children.forEach(child => items.push(...child.items));
-      if (!children[0].isMeta) {
-        // Any because our type params are all screwy and FlowIssue didn't suppress the error.
-        return new ListLeafSequence(this.vr, this.type, (items: any));
-      }
-
-      return new IndexedMetaSequence(this.vr, this.type, items);
-    });
-  }
-
   cumulativeNumberOfLeaves(idx: number): number {
     return this._offsets[idx];
   }
 
-  getCompareFn(other: IndexedSequence<any>): EqualsFn {
-    return (idx: number, otherIdx: number) =>
-      this.items[idx].ref.targetHash.equals(other.items[otherIdx].ref.targetHash);
+  getKey(idx: number): OrderedKey<K> {
+    return this.items[idx].key;
   }
 }
 
-export function newMapMetaSequence<K: Value>(vr: ?ValueReader,
-    tuples: Array<MetaTuple<any>>): OrderedMetaSequence<K> {
+export function newMapMetaSequence<T, K: Value>(vr: ?ValueReader, tuples: MetaTuple<T, K>[])
+    : MetaSequence<T, K> {
   const kt = makeUnionType(tuples.map(mt => getCollectionTypes(mt)[0]));
   const vt = makeUnionType(tuples.map(mt => getCollectionTypes(mt)[1]));
   const t = makeMapType(kt, vt);
-  return new OrderedMetaSequence(vr, t, tuples);
+  return new MetaSequence(vr, t, tuples);
 }
 
-export function newSetMetaSequence<K: Value>(vr: ?ValueReader,
-    tuples: Array<MetaTuple<any>>): OrderedMetaSequence<K> {
+export function newSetMetaSequence<T: Value>(vr: ?ValueReader, tuples: MetaTuple<T, T>[])
+    : MetaSequence<T, T> {
   const t = makeSetType(makeUnionType(tuples.map(mt => getCollectionTypes(mt)[0])));
-  return new OrderedMetaSequence(vr, t, tuples);
+  return new MetaSequence(vr, t, tuples);
 }
 
-export class OrderedMetaSequence<K: Value> extends OrderedSequence<K, MetaTuple<any>> {
-  _numLeaves: number;
-
-  constructor(vr: ?ValueReader, t: Type<any>, items: Array<MetaTuple<any>>) {
-    super(vr, t, items);
-    this._numLeaves = items.reduce((l, mt) => l + mt.numLeaves, 0);
-  }
-
-  get isMeta(): boolean {
-    return true;
-  }
-
-  get numLeaves(): number {
-    return this._numLeaves;
-  }
-
-  get chunks(): Array<Ref<any>> {
-    return getMetaSequenceChunks(this);
-  }
-
-  getChildSequence(idx: number): Promise<?Sequence<any>> {
-    if (!this.isMeta) {
-      return Promise.resolve(null);
-    }
-
-    const mt = this.items[idx];
-    return mt.getChildSequence(this.vr);
-  }
-
-  getChildSequenceSync(idx: number): ?Sequence<any> {
-    if (!this.isMeta) {
-      return null;
-    }
-
-    const mt = this.items[idx];
-    return mt.getChildSequenceSync();
-  }
-
-  getKey(idx: number): OrderedKey<any> {
-    return this.items[idx].key;
-  }
-
-  getCompareFn(other: OrderedSequence<any, any>): EqualsFn {
-    return (idx: number, otherIdx: number) =>
-      this.items[idx].ref.targetHash.equals(other.items[otherIdx].ref.targetHash);
-  }
-}
-
-export function newOrderedMetaSequenceChunkFn(kind: NomsKind, vr: ?ValueReader)
-    : makeChunkFn<any, any> {
-  return (tuples: Array<MetaTuple<any>>) => {
+export function newOrderedMetaSequenceChunkFn<T, K: Value>(kind: NomsKind, vr: ?ValueReader)
+    : makeChunkFn<T, K> {
+  // $FlowIssue: this is confusing flow.
+  return (tuples: MetaTuple<T, K>[]) => {
     const numLeaves = tuples.reduce((l, mt) => l + mt.numLeaves, 0);
     const last = tuples[tuples.length - 1];
-    let seq: OrderedMetaSequence<any>;
-    let col: Collection<any>;
+    let seq, col;
     if (kind === Kind.Map) {
       seq = newMapMetaSequence(vr, tuples);
       col = Map.fromSequence(seq);
@@ -325,16 +297,16 @@ export function newOrderedMetaSequenceChunkFn(kind: NomsKind, vr: ?ValueReader)
   };
 }
 
-export function newIndexedMetaSequenceChunkFn(kind: NomsKind, vr: ?ValueReader)
-    : makeChunkFn<any, any> {
-  return (tuples: Array<MetaTuple<any>>) => {
+export function newIndexedMetaSequenceChunkFn<T, K: Value>(kind: NomsKind, vr: ?ValueReader)
+    : makeChunkFn<T, K> {
+  // $FlowIssue: this is confusing Flow.
+  return (tuples: MetaTuple<T, K>[]) => {
     const sum = tuples.reduce((l, mt) => {
       const nv = mt.key.numberValue();
       invariant(nv === mt.numLeaves);
       return l + nv;
     }, 0);
-    let seq: IndexedMetaSequence;
-    let col: Collection<any>;
+    let seq, col;
     if (kind === Kind.List) {
       seq = newListMetaSequence(vr, tuples);
       col = List.fromSequence(seq);
@@ -348,12 +320,25 @@ export function newIndexedMetaSequenceChunkFn(kind: NomsKind, vr: ?ValueReader)
   };
 }
 
-function getMetaSequenceChunks(ms: MetaSequence<any>): Array<Ref<any>> {
-  return ms.items.map(mt => mt.ref);
-}
-
-class EmptySequence extends IndexedSequence {
+class EmptySequence extends LeafSequence<any, any> {
   constructor() {
     super(null, valueType, []);
+  }
+
+  // Sequence implementation
+
+  get chunks(): Ref<any>[] {
+    return [];
+  }
+
+  getEqualsFn(other: Sequence<any, any>): EqualsFn {
+    invariant(other instanceof EmptySequence);
+    return (idx: number, otherIdx: number) => { // eslint-disable-line
+      throw new Error('empty sequence');
+    };
+  }
+
+  getKey(idx: number): any { // eslint-disable-line
+    throw new Error('empty sequence');
   }
 }

@@ -4,12 +4,16 @@
 
 // @flow
 
-import Blob, {BlobLeafSequence} from './blob.js';
-import List, {ListLeafSequence} from './list.js';
-import Map, {MapLeafSequence} from './map.js';
+import Blob from './blob.js';
+import BlobLeafSequence from './blob-leaf-sequence.js';
+import List from './list.js';
+import ListLeafSequence from './list-leaf-sequence.js';
+import Map from './map.js';
+import MapLeafSequence from './map-leaf-sequence.js';
 import Ref, {constructRef} from './ref.js';
-import Sequence from './sequence.js';
-import Set, {SetLeafSequence} from './set.js';
+import type {Sequence} from './sequence.js';
+import Set from './set.js';
+import SetLeafSequence from './set-leaf-sequence.js';
 import Struct, {StructMirror} from './struct.js';
 import type Value from './value.js';
 import type {NomsKind} from './noms-kind.js';
@@ -99,7 +103,7 @@ export default class ValueEncoder {
     });
   }
 
-  maybeWriteMetaSequence(v: Sequence<any>): boolean {
+  maybeWriteMetaSequence(v: Sequence<any, any>): boolean {
     if (!v.isMeta) {
       this._w.writeBool(false); // not a meta sequence
       return false;
@@ -110,7 +114,7 @@ export default class ValueEncoder {
     const count = v.items.length;
     this._w.writeUint32(count);
     for (let i = 0; i < count; i++) {
-      const tuple: MetaTuple<any> = v.items[i];
+      const tuple = v.items[i];
       invariant(tuple instanceof MetaTuple);
       const child = tuple.child;
       if (child && this._vw) {

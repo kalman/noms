@@ -8,7 +8,8 @@ import {assert} from 'chai';
 import {suite, setup, teardown, test} from 'mocha';
 
 import Ref from './ref.js';
-import Set, {SetLeafSequence} from './set.js';
+import Set from './set.js';
+import SetLeafSequence from './set-leaf-sequence.js';
 import type {ValueReadWriter} from './value-store.js';
 import {OrderedKey, MetaTuple, newSetMetaSequence} from './meta-sequence.js';
 import {compare, equals} from './compare.js';
@@ -27,7 +28,7 @@ import {getTypeOfValue} from './type.js';
 import type Value from './value.js';
 import {invariant, notNull} from './assert.js';
 import {newStruct} from './struct.js';
-import {OrderedMetaSequence} from './meta-sequence.js';
+import MetaSequence from './meta-sequence.js';
 import {smallTestChunks, normalProductionChunks} from './rolling-value-hasher.js';
 import {
   makeRefType,
@@ -650,7 +651,7 @@ suite('CompoundSet', () => {
     }
 
     await t(10, SetLeafSequence);
-    await t(2000, OrderedMetaSequence);
+    await t(2000, MetaSequence);
   });
 
   test('Remove last when not loaded', async () => {

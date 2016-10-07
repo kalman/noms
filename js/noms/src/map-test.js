@@ -26,11 +26,11 @@ import {getTypeOfValue} from './type.js';
 import type Value from './value.js';
 import {invariant, notNull} from './assert.js';
 import List from './list.js';
-import Map, {MapLeafSequence} from './map.js';
-import {OrderedKey, MetaTuple, newMapMetaSequence} from './meta-sequence.js';
+import Map, {KEY, VALUE} from './map.js';
+import MapLeafSequence from './map-leaf-sequence.js';
+import MetaSequence, {OrderedKey, MetaTuple, newMapMetaSequence} from './meta-sequence.js';
 import type {ValueReadWriter} from './value-store.js';
 import {compare, equals} from './compare.js';
-import {OrderedMetaSequence} from './meta-sequence.js';
 import {smallTestChunks, normalProductionChunks} from './rolling-value-hasher.js';
 import {
   makeMapType,
@@ -451,7 +451,7 @@ suite('CompoundMap', () => {
     await db.close();
   });
 
-  function build(vwr: ValueReadWriter): Array<Map<any, any>> {
+  function build<K: Value, V: Value>(vwr: ValueReadWriter): Map<K, V>[] {
     const l1 = new Map([['a', false], ['b', false]]);
     const r1 = vwr.writeValue(l1);
     const l2 = new Map([['e', true], ['f', true]]);
@@ -476,6 +476,8 @@ suite('CompoundMap', () => {
       new MetaTuple(rm1, new OrderedKey('f'), 4, null),
       new MetaTuple(rm2, new OrderedKey('n'), 4, null),
     ]));
+
+    invariant(c instanceof Map && m1 instanceof Map && m2 instanceof Map);
     return [c, m1, m2];
   }
 
@@ -700,10 +702,11 @@ suite('CompoundMap', () => {
   test('chunks', () => {
     const m = build(db)[1];
     const chunks = m.chunks;
-    const sequence = m.sequence;
     assert.equal(2, chunks.length);
-    assert.deepEqual(sequence.items[0].ref, chunks[0]);
-    assert.deepEqual(sequence.items[1].ref, chunks[1]);
+    const sequence = m.sequence;
+    assert.equal(1, sequence.items.length);
+    assert.deepEqual(sequence.items[0][KEY].ref, chunks[KEY]);
+    assert.deepEqual(sequence.items[0][VALUE].ref, chunks[VALUE]);
   });
 
   test('Type after mutations', async () => {
@@ -738,7 +741,7 @@ suite('CompoundMap', () => {
       smallTestChunks();
     }
 
-    await t(1000, OrderedMetaSequence);
+    await t(1000, MetaSequence);
   });
 
   test('compound map with values of every type', async () => {

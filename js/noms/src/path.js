@@ -11,8 +11,9 @@ import {Kind} from './noms-kind.js';
 import List from './list.js';
 import Map from './map.js';
 import Set from './set.js';
+import {Sequence} from './sequence.js';
 import {OrderedKey} from './meta-sequence.js';
-import {OrderedSequence} from './ordered-sequence.js';
+import {newCursorAtKey} from './ordered-sequence.js';
 import {fieldNameComponentRe} from './struct.js';
 import {getTypeOfValue, StructDesc} from './type.js';
 
@@ -344,7 +345,7 @@ export class HashIndexPath {
   }
 
   async resolve(value: Value): Promise<Value | null> {
-    let seq: OrderedSequence<any, any>;
+    let seq: Sequence<any, any>;
     let getCurrentValue; // (cur: sequenceCursor): Value
 
     if (value instanceof Set) {
@@ -363,7 +364,7 @@ export class HashIndexPath {
       return null;
     }
 
-    const cur = await seq.newCursorAt(OrderedKey.fromHash(this.hash));
+    const cur = await newCursorAtKey(seq, OrderedKey.fromHash(this.hash));
     if (!cur.valid) {
       return null;
     }
