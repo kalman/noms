@@ -29,12 +29,12 @@ func (bl blobLeafSequence) writeTo(w nomsWriter) {
 	w.writeRaw(bl.buff)
 }
 
-// sequence interface
-
 func (bl blobLeafSequence) data() []byte {
 	offset := bl.offsets[sequencePartValues] - bl.offsets[sequencePartKind]
 	return bl.buff[offset:]
 }
+
+// sequence interface
 
 func (bl blobLeafSequence) getCompareFn(other sequence) compareFn {
 	offsetStart := int(bl.offsets[sequencePartValues] - bl.offsets[sequencePartKind])

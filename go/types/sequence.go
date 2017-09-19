@@ -22,6 +22,7 @@ type sequence interface {
 	getChildSequence(idx int) sequence
 	treeLevel() uint64
 	isLeaf() bool
+	values() []Value
 	getCompositeChildSequence(start uint64, length uint64) sequence
 	cumulativeNumberOfLeaves(idx int) uint64
 	hash() hash.Hash

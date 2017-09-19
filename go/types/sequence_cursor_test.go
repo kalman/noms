@@ -68,6 +68,10 @@ func (ts testSequence) isLeaf() bool {
 	panic("not reached")
 }
 
+func (ts testSequence) values() []Value {
+	panic("not reached")
+}
+
 func (ts testSequence) equals(other sequence) bool {
 	panic("not reached")
 }

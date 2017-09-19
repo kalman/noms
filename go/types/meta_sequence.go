@@ -311,6 +311,10 @@ func (ms metaSequence) isLeaf() bool {
 	return false
 }
 
+func (ms metaSequence) values() []Value {
+	panic("cannot call values() on a metaSequence")
+}
+
 // metaSequence interface
 func (ms metaSequence) getChildSequence(idx int) sequence {
 	mt := ms.getItem(idx).(metaTuple)
@@ -496,6 +500,11 @@ func (es emptySequence) treeLevel() uint64 {
 
 func (es emptySequence) isLeaf() bool {
 	return es.level == 0
+}
+
+func (es emptySequence) values() []Value {
+	d.PanicIfFalse(es.isLeaf())
+	return nil
 }
 
 func (es emptySequence) hash() hash.Hash {

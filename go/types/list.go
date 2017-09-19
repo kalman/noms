@@ -120,23 +120,6 @@ func (l List) Get(idx uint64) Value {
 
 type MapFunc func(v Value, index uint64) interface{}
 
-// Deprecated: This API may change in the future. Use IterAll or Iterator instead.
-func (l List) Map(mf MapFunc) []interface{} {
-	// TODO: This is bad API. It should have returned another List.
-	// https://github.com/attic-labs/noms/issues/2557
-	idx := uint64(0)
-	cur := newCursorAtIndex(l.seq, idx, true)
-
-	results := make([]interface{}, 0, l.Len())
-	cur.iter(func(v interface{}) bool {
-		res := mf(v.(Value), uint64(idx))
-		results = append(results, res)
-		idx++
-		return false
-	})
-	return results
-}
-
 // Concat returns a new List comprised of this joined with other. It only needs
 // to visit the rightmost prolly tree chunks of this List, and the leftmost
 // prolly tree chunks of other, so it's efficient.
@@ -168,15 +151,58 @@ type listIterAllFunc func(v Value, index uint64)
 // IterAll iterates over the list and calls f for every element in the list. Unlike Iter there is no
 // way to stop the iteration and all elements are visited.
 func (l List) IterAll(f listIterAllFunc) {
-	// TODO: Consider removing this and have Iter behave like IterAll.
-	// https://github.com/attic-labs/noms/issues/2558
-	idx := uint64(0)
-	cur := newCursorAtIndex(l.seq, idx, true)
-	cur.iter(func(v interface{}) bool {
-		f(v.(Value), uint64(idx))
-		idx++
-		return false
-	})
+	l.IterAllReadAhead(f, 2<<10 /* 2K */, 6)
+}
+
+// IterAllReadAhead is like IterAll but attemps to stay |concurrency|
+// |numLeaves| leaf sequences ahead of the last Value passed to |f|.
+func (l List) IterAllReadAhead(f listIterAllFunc, numLeaves uint64, concurrency int) {
+	i := uint64(0)
+	cb := func(vs []Value) {
+		for _, v := range vs {
+			f(v, i)
+			i++
+		}
+	}
+
+	if l.seq.isLeaf() {
+		cb(l.seq.values())
+		return
+	}
+
+	// TODO: Move this into cursorAtIndex and add a treeLevel check to that.
+	// TODO: You could implement multi-chunk loading by passing through a slice
+	// of metaTuple rather than a single one.
+	mtChan := make(chan metaTuple)
+	go func() {
+		sc := newSequenceCursor(nil, l.sequence(), 0, false)
+		for sc.seq.treeLevel() > 1 {
+			sc = newSequenceCursor(sc, sc.getChildSequence(), 0, false)
+		}
+		for sc.valid() {
+			mtChan <- sc.current().(metaTuple)
+			sc.advance()
+		}
+		close(mtChan)
+	}()
+
+	vsChanChan := make(chan chan []Value, concurrency)
+	go func() {
+		for mt := range mtChan {
+			mt := mt
+			vsChan := make(chan []Value)
+			vsChanChan <- vsChan
+			go func() {
+				seq := mt.getChildSequence(l.sequence().valueReadWriter())
+				vsChan <- seq.values()
+			}()
+		}
+		close(vsChanChan)
+	}()
+
+	for vsChan := range vsChanChan {
+		cb(<-vsChan)
+	}
 }
 
 // Iterator returns a ListIterator which can be used to iterate efficiently over a list.
