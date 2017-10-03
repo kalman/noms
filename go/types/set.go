@@ -144,10 +144,8 @@ func (s Set) Iter(cb setIterCallback) {
 type setIterAllCallback func(v Value)
 
 func (s Set) IterAll(cb setIterAllCallback) {
-	cur := newCursorAt(s.orderedSequence, emptyKey, false, false, true)
-	cur.iter(func(v interface{}) bool {
-		cb(v.(Value))
-		return false
+	iterAll(s, func(v Value, idx uint64) {
+		cb(v)
 	})
 }
 

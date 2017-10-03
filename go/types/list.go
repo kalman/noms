@@ -113,6 +113,10 @@ type listIterAllFunc func(v Value, index uint64)
 // IterAll iterates over the list and calls f for every element in the list. Unlike Iter there is no
 // way to stop the iteration and all elements are visited.
 func (l List) IterAll(f listIterAllFunc) {
+	iterAll(l, f)
+}
+
+func iterAll(c Collection, f listIterAllFunc) {
 	concurrency := 6
 	vcChan := make(chan chan []Value, concurrency)
 
@@ -122,11 +126,11 @@ func (l List) IterAll(f listIterAllFunc) {
 	estimatedNumValues := uint64(1000)
 
 	go func() {
-		for idx, llen := uint64(0), l.Len(); idx < llen; {
+		for idx, l := uint64(0), c.Len(); idx < l; {
 			numValues := atomic.LoadUint64(&estimatedNumValues)
 
 			start := idx
-			blockLength := llen - start
+			blockLength := l - start
 			if blockLength > numValues {
 				blockLength = numValues
 			}
@@ -137,7 +141,7 @@ func (l List) IterAll(f listIterAllFunc) {
 
 			go func() {
 				values := make([]Value, blockLength)
-				numBytes := l.copyReadAhead(values, start)
+				numBytes := copyReadAhead(c, values, start)
 
 				// Adjust the estimated number of values to try to read
 				// |targetBatchBytes| next time.
@@ -170,33 +174,33 @@ func (l List) IterAll(f listIterAllFunc) {
 	}
 }
 
-func (l List) copyReadAhead(out []Value, startIdx uint64) (numBytes uint64) {
-	llen := l.Len()
-	d.PanicIfFalse(startIdx < llen)
+func copyReadAhead(c Collection, out []Value, startIdx uint64) (numBytes uint64) {
+	l := c.Len()
+	d.PanicIfFalse(startIdx < l)
 
 	endIdx := startIdx + uint64(len(out))
-	if endIdx > llen {
-		endIdx = llen
+	if endIdx > l {
+		endIdx = l
 	}
 
 	if startIdx == endIdx {
 		return
 	}
 
-	leaves, localStart := LoadLeafNodes([]Collection{l}, startIdx, endIdx)
+	leaves, localStart := LoadLeafNodes([]Collection{c}, startIdx, endIdx)
 	endIdx = localStart + endIdx - startIdx
 	startIdx = localStart
 
 	for _, leaf := range leaves {
-		ls := leaf.asSequence().(listLeafSequence)
+		seq := leaf.asSequence()
 
-		values := ls.valuesSlice(startIdx, endIdx)
+		values := seq.valuesSlice(startIdx, endIdx)
 		copy(out, values)
 		out = out[len(values):]
 
 		endIdx = endIdx - uint64(len(values)) - startIdx
 		startIdx = 0
-		numBytes += uint64(len(ls.buff))
+		numBytes += uint64(len(seq.valueBytes()))
 	}
 	return
 }
