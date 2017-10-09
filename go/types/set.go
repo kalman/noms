@@ -105,7 +105,7 @@ func (s Set) Value() Value {
 }
 
 func (s Set) WalkValues(cb ValueCallback) {
-	s.IterAll(func(v Value) {
+	iterAll(s, func(v Value, idx uint64) {
 		cb(v)
 	})
 }

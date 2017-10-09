@@ -69,7 +69,7 @@ func (seq leafSequence) values() []Value {
 }
 
 func (seq leafSequence) valuesSlice(from, to uint64) []Value {
-	if len := seq.Len(); to > len {
+	if len := seq.numValues(); to > len {
 		to = len
 	}
 	dec := seq.decoderSkipToIndex(int(from))
@@ -110,6 +110,15 @@ func (seq leafSequence) typeOf() *Type {
 func (seq leafSequence) numLeaves() uint64 {
 	_, count := seq.decoderSkipToValues()
 	return count
+}
+
+func (seq leafSequence) numValues() uint64 {
+	dec := seq.decoder()
+	kind := dec.readKind()
+	if kind == MapKind {
+		return seq.numLeaves() * 2
+	}
+	return seq.numLeaves()
 }
 
 func (seq leafSequence) getChildSequence(idx int) sequence {

@@ -111,16 +111,20 @@ func LoadLeafNodes(cols []Collection, startIdx, endIdx uint64) ([]Collection, ui
 		ms := s.(metaSequence)
 
 		for _, mt := range ms.tuples() {
-			numLeaves := mt.numLeaves()
-			if cum == 0 && numLeaves <= startIdx {
+			numValues := mt.numLeaves()
+			if s.Kind() == MapKind {
+				numValues *= 2
+			}
+
+			if cum == 0 && numValues <= startIdx {
 				// skip tuples whose items are < startIdx
-				startIdx -= numLeaves
-				endIdx -= numLeaves
+				startIdx -= numValues
+				endIdx -= numValues
 				continue
 			}
 
 			childTuples = append(childTuples, mt)
-			cum += numLeaves
+			cum += numValues
 			if cum >= endIdx {
 				break
 			}

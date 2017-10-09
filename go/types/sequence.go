@@ -28,6 +28,7 @@ type sequence interface {
 	Len() uint64
 	Less(other Value) bool
 	numLeaves() uint64
+	numValues() uint64
 	seqLen() int
 	treeLevel() uint64
 	typeOf() *Type

@@ -1668,3 +1668,18 @@ func TestNestedEditing(t *testing.T) {
 	mOut = me0.Map()
 	assert.True(t, mOut.Equals(NewMap(vrw))) // remove empty
 }
+
+func TestMapPoop(t *testing.T) {
+	vrw := newTestValueStore()
+
+	m := NewMap(vrw,
+		String("a"), Number(1),
+		String("b"), Number(2),
+		String("c"), Number(3),
+	)
+
+	m.IterAll(func(k, v Value) {
+		fmt.Println("(test) k:", EncodedValue(k))
+		fmt.Println("(test) v:", EncodedValue(v))
+	})
+}

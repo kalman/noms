@@ -69,7 +69,7 @@ func (l List) Value() Value {
 }
 
 func (l List) WalkValues(cb ValueCallback) {
-	l.IterAll(func(v Value, idx uint64) {
+	iterAll(l, func(v Value, idx uint64) {
 		cb(v)
 	})
 }
@@ -126,7 +126,7 @@ func iterAll(c Collection, f listIterAllFunc) {
 	estimatedNumValues := uint64(1000)
 
 	go func() {
-		for idx, l := uint64(0), c.Len(); idx < l; {
+		for idx, l := uint64(0), c.asSequence().numValues(); idx < l; {
 			numValues := atomic.LoadUint64(&estimatedNumValues)
 
 			start := idx
@@ -175,7 +175,7 @@ func iterAll(c Collection, f listIterAllFunc) {
 }
 
 func copyReadAhead(c Collection, out []Value, startIdx uint64) (numBytes uint64) {
-	l := c.Len()
+	l := c.asSequence().numValues()
 	d.PanicIfFalse(startIdx < l)
 
 	endIdx := startIdx + uint64(len(out))

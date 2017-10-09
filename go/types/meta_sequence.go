@@ -282,6 +282,13 @@ func (ms metaSequence) numLeaves() uint64 {
 	return ms.cumulativeNumberOfLeaves(int(count - 1))
 }
 
+func (ms metaSequence) numValues() uint64 {
+	if ms.Kind() == MapKind {
+		return ms.numLeaves() * 2
+	}
+	return ms.numLeaves()
+}
+
 func (ms metaSequence) treeLevel() uint64 {
 	dec := ms.decoderAtPart(sequencePartLevel)
 	return dec.readCount()
@@ -393,6 +400,10 @@ func (es emptySequence) seqLen() int {
 }
 
 func (es emptySequence) numLeaves() uint64 {
+	return 0
+}
+
+func (es emptySequence) numValues() uint64 {
 	return 0
 }
 

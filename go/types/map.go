@@ -120,11 +120,9 @@ func (m Map) Value() Value {
 }
 
 func (m Map) WalkValues(cb ValueCallback) {
-	m.IterAll(func(k, v Value) {
-		cb(k)
+	iterAll(m, func(v Value, idx uint64) {
 		cb(v)
 	})
-	return
 }
 
 func (m Map) firstOrLast(last bool) (Value, Value) {
@@ -222,6 +220,10 @@ func (m Map) IteratorFrom(key Value) MapIterator {
 type mapIterAllCallback func(key, value Value)
 
 func (m Map) IterAll(cb mapIterAllCallback) {
+	iterAll(m, func(v Value, idx uint64) {
+		fmt.Println("(impl) v:", EncodedValue(v))
+	})
+
 	var k Value
 	iterAll(m, func(v Value, idx uint64) {
 		if k != nil {

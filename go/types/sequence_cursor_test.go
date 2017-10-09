@@ -28,6 +28,10 @@ func (ts testSequence) numLeaves() uint64 {
 	return uint64(len(ts.items))
 }
 
+func (ts testSequence) numValues() uint64 {
+	return ts.numLeaves()
+}
+
 func (ts testSequence) cumulativeNumberOfLeaves(idx int) uint64 {
 	panic("not reached")
 }
