@@ -140,7 +140,7 @@ func (b Blob) Concat(other Blob) Blob {
 }
 
 func (b Blob) newChunker(cur *sequenceCursor, vrw ValueReadWriter) *sequenceChunker {
-	return newSequenceChunker(cur, 0, vrw, makeBlobLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(BlobKind, vrw), hashValueByte)
+	return newSequenceChunker(BlobKind, cur, 0, vrw, makeBlobLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(BlobKind, vrw), hashValueByte)
 }
 
 func (b Blob) asSequence() sequence {
@@ -189,12 +189,12 @@ func (cbr *BlobReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 func makeBlobLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
-	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
+	return func(level uint64, items []sequenceEntry) (Collection, orderedKey, uint64) {
 		d.PanicIfFalse(level == 0)
 		buff := make([]byte, len(items))
 
 		for i, v := range items {
-			buff[i] = v.(byte)
+			buff[i] = v.item.(byte)
 		}
 
 		return chunkBlobLeaf(vrw, buff)
@@ -243,7 +243,7 @@ func readBlobsP(vrw ValueReadWriter, rs ...io.Reader) Blob {
 }
 
 func readBlob(r io.Reader, vrw ValueReadWriter) Blob {
-	sc := newEmptySequenceChunker(vrw, makeBlobLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(BlobKind, vrw), func(item sequenceItem, rv *rollingValueHasher) {
+	sc := newEmptySequenceChunker(BlobKind, vrw, makeBlobLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(BlobKind, vrw), func(item sequenceItem, rv *rollingValueHasher) {
 		rv.HashByte(item.(byte))
 	})
 

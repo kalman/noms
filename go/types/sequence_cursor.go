@@ -67,6 +67,12 @@ func (cur *sequenceCursor) current() sequenceItem {
 	return cur.getItem(cur.idx)
 }
 
+func (cur *sequenceCursor) currentEntry() sequenceEntry {
+	d.PanicIfFalse(cur.valid())
+	// XXX
+	return sequenceEntry{1, cur.getItem(cur.idx)}
+}
+
 func (cur *sequenceCursor) valid() bool {
 	return cur.idx >= 0 && cur.idx < cur.length()
 }

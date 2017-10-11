@@ -59,7 +59,7 @@ func (be *BlobEditor) Blob() Blob {
 		idx++
 
 		if ch == nil {
-			ch = newSequenceChunker(cur, 0, vrw, makeBlobLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(BlobKind, vrw), hashValueByte)
+			ch = newSequenceChunker(BlobKind, cur, 0, vrw, makeBlobLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(BlobKind, vrw), hashValueByte)
 		} else {
 			ch.advanceTo(cur)
 		}

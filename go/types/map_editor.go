@@ -114,7 +114,7 @@ func (me *MapEditor) Map() Map {
 		}
 
 		if ch == nil {
-			ch = newSequenceChunker(cur, 0, vrw, makeMapLeafChunkFn(vrw), newOrderedMetaSequenceChunkFn(MapKind, vrw), mapHashValueBytes)
+			ch = newSequenceChunker(MapKind, cur, 0, vrw, makeMapLeafChunkFn(vrw), newOrderedMetaSequenceChunkFn(MapKind, vrw), mapHashValueBytes)
 		} else {
 			ch.advanceTo(cur)
 		}

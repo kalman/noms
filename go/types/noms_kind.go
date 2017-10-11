@@ -26,22 +26,28 @@ const (
 
 	TypeKind
 	UnionKind
+
+	// Only used in serialization, represents a List which is "compressed" to
+	// remove duplicates.
+	CompressedList
 )
 
-var KindToString = map[NomsKind]string{
-	BlobKind:   "Blob",
-	BoolKind:   "Bool",
-	CycleKind:  "Cycle",
-	ListKind:   "List",
-	MapKind:    "Map",
-	NumberKind: "Number",
-	RefKind:    "Ref",
-	SetKind:    "Set",
-	StructKind: "Struct",
-	StringKind: "String",
-	TypeKind:   "Type",
-	UnionKind:  "Union",
-	ValueKind:  "Value",
+var KindToString = []string{
+	"Bool",
+	"Number",
+	"String",
+	"Blob",
+	"Value",
+	"List",
+	"Map",
+	"Ref",
+	"Set",
+	"Struct",
+	"Cycle",
+	"Type",
+	"Union",
+	"Repeat",
+	"CompressedList",
 }
 
 // String returns the name of the kind.

@@ -245,16 +245,17 @@ func (l List) DiffWithLimit(last List, changes chan<- Splice, closeChan <-chan s
 }
 
 func (l List) newChunker(cur *sequenceCursor, vrw ValueReadWriter) *sequenceChunker {
-	return newSequenceChunker(cur, 0, vrw, makeListLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(ListKind, vrw), hashValueBytes)
+	return newSequenceChunker(ListKind, cur, 0, vrw, makeListLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(ListKind, vrw), hashValueBytes)
 }
 
 func makeListLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
-	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
+	return func(level uint64, items []sequenceEntry) (Collection, orderedKey, uint64) {
 		d.PanicIfFalse(level == 0)
 		values := make([]Value, len(items))
 
+		// TODO: Encode as CompressedList if any |count| is > 1.
 		for i, v := range items {
-			values[i] = v.(Value)
+			values[i] = v.item.(Value)
 		}
 
 		list := newList(newListLeafSequence(vrw, values...))
@@ -263,5 +264,5 @@ func makeListLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
 }
 
 func newEmptyListSequenceChunker(vrw ValueReadWriter) *sequenceChunker {
-	return newEmptySequenceChunker(vrw, makeListLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(ListKind, vrw), hashValueBytes)
+	return newEmptySequenceChunker(ListKind, vrw, makeListLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(ListKind, vrw), hashValueBytes)
 }

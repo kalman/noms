@@ -57,12 +57,12 @@ func advanceCursorToOffset(cur *sequenceCursor, idx uint64) uint64 {
 }
 
 func newIndexedMetaSequenceChunkFn(kind NomsKind, vrw ValueReadWriter) makeChunkFn {
-	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
+	return func(level uint64, items []sequenceEntry) (Collection, orderedKey, uint64) {
 		tuples := make([]metaTuple, len(items))
 		numLeaves := uint64(0)
 
 		for i, v := range items {
-			mt := v.(metaTuple)
+			mt := v.item.(metaTuple)
 			tuples[i] = mt
 			numLeaves += mt.numLeaves()
 		}

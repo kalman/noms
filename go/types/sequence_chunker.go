@@ -9,11 +9,12 @@ import "github.com/attic-labs/noms/go/d"
 type hashValueBytesFn func(item sequenceItem, rv *rollingValueHasher)
 
 type sequenceChunker struct {
+	kind                       NomsKind
 	cur                        *sequenceCursor
 	level                      uint64
 	vrw                        ValueReadWriter
 	parent                     *sequenceChunker
-	current                    []sequenceItem
+	current                    []sequenceEntry
 	makeChunk, parentMakeChunk makeChunkFn
 	isLeaf                     bool
 	hashValueBytes             hashValueBytesFn
@@ -22,14 +23,19 @@ type sequenceChunker struct {
 	unwrittenCol               Collection
 }
 
-// makeChunkFn takes a sequence of items to chunk, and returns the result of chunking those items, a tuple of a reference to that chunk which can itself be chunked + its underlying value.
-type makeChunkFn func(level uint64, values []sequenceItem) (Collection, orderedKey, uint64)
-
-func newEmptySequenceChunker(vrw ValueReadWriter, makeChunk, parentMakeChunk makeChunkFn, hashValueBytes hashValueBytesFn) *sequenceChunker {
-	return newSequenceChunker(nil, uint64(0), vrw, makeChunk, parentMakeChunk, hashValueBytes)
+type sequenceEntry struct {
+	count uint64
+	item  sequenceItem
 }
 
-func newSequenceChunker(cur *sequenceCursor, level uint64, vrw ValueReadWriter, makeChunk, parentMakeChunk makeChunkFn, hashValueBytes hashValueBytesFn) *sequenceChunker {
+// makeChunkFn takes a sequence of items to chunk, and returns the result of chunking those items, a tuple of a reference to that chunk which can itself be chunked + its underlying value.
+type makeChunkFn func(level uint64, values []sequenceEntry) (Collection, orderedKey, uint64)
+
+func newEmptySequenceChunker(kind NomsKind, vrw ValueReadWriter, makeChunk, parentMakeChunk makeChunkFn, hashValueBytes hashValueBytesFn) *sequenceChunker {
+	return newSequenceChunker(kind, nil, uint64(0), vrw, makeChunk, parentMakeChunk, hashValueBytes)
+}
+
+func newSequenceChunker(kind NomsKind, cur *sequenceCursor, level uint64, vrw ValueReadWriter, makeChunk, parentMakeChunk makeChunkFn, hashValueBytes hashValueBytesFn) *sequenceChunker {
 	d.PanicIfFalse(makeChunk != nil)
 	d.PanicIfFalse(parentMakeChunk != nil)
 	d.PanicIfFalse(hashValueBytes != nil)
@@ -38,11 +44,12 @@ func newSequenceChunker(cur *sequenceCursor, level uint64, vrw ValueReadWriter, 
 	// |cur| will be nil if this is a new sequence, implying this is a new tree, or the tree has grown in height relative to its original chunked form.
 
 	sc := &sequenceChunker{
+		kind,
 		cur,
 		level,
 		vrw,
 		nil,
-		make([]sequenceItem, 0, 1<<10),
+		make([]sequenceEntry, 0, 1<<10),
 		makeChunk, parentMakeChunk,
 		true,
 		hashValueBytes,
@@ -70,7 +77,7 @@ func (sc *sequenceChunker) resume() {
 	}
 
 	for ; sc.cur.idx < idx; sc.cur.advance() {
-		sc.Append(sc.cur.current())
+		sc.appendEntry(sc.cur.currentEntry())
 	}
 }
 
@@ -106,7 +113,7 @@ func (sc *sequenceChunker) advanceTo(next *sequenceCursor) {
 	// below is entered but Case (4) isn't reached, then it is Case (3).
 	reachedNext := true
 	for sc.cur.compare(next) < 0 {
-		if sc.Append(sc.cur.current()) && sc.cur.atLastItem() {
+		if sc.appendEntry(sc.cur.currentEntry()) && sc.cur.atLastItem() {
 			if sc.cur.parent != nil {
 
 				if sc.cur.parent.compare(next.parent) < 0 {
@@ -143,10 +150,43 @@ func (sc *sequenceChunker) advanceTo(next *sequenceCursor) {
 	}
 }
 
-func (sc *sequenceChunker) Append(item sequenceItem) bool {
+func (sc *sequenceChunker) Append(item sequenceItem) {
 	d.PanicIfTrue(item == nil)
-	sc.current = append(sc.current, item)
-	sc.hashValueBytes(item, sc.rv)
+
+	// Only support CountList/CompressedList/RepeatList/whateverList for Lists.
+	if sc.kind != ListKind {
+		sc.appendEntry(sequenceEntry{1, item})
+		return
+	}
+
+	if len(sc.current) == 0 {
+		sc.current = append(sc.current, sequenceEntry{1, item})
+		return
+	}
+
+	// XXX: == doesn't really work, need to use equals(). but these aren't
+	// necessarily values, so need to type check as well (or check isLeaf).
+	if l := len(sc.current); sc.current[l-1].item == item {
+		sc.current[l-1].count++
+	} else {
+		sc.consumeLastEntry()
+		sc.current = append(sc.current, sequenceEntry{1, item})
+	}
+}
+
+func (sc *sequenceChunker) appendEntry(entry sequenceEntry) bool {
+	sc.current = append(sc.current, entry)
+	return sc.consumeLastEntry()
+}
+
+func (sc *sequenceChunker) consumeLastEntry() bool {
+	last := sc.current[len(sc.current)-1]
+
+	if last.count > 1 {
+		sc.hashValueBytes(Number(last.count), sc.rv)
+	}
+	sc.hashValueBytes(last.item, sc.rv)
+
 	if sc.rv.crossedBoundary {
 		sc.handleChunkBoundary()
 		return true
@@ -165,7 +205,7 @@ func (sc *sequenceChunker) createParent() {
 		// Clone the parent cursor because otherwise calling cur.advance() will affect our parent - and vice versa - in surprising ways. Instead, Skip moves forward our parent's cursor if we advance across a boundary.
 		parent = sc.cur.parent
 	}
-	sc.parent = newSequenceChunker(parent, sc.level+1, sc.vrw, sc.parentMakeChunk, sc.parentMakeChunk, metaHashValueBytes)
+	sc.parent = newSequenceChunker(sc.kind, parent, sc.level+1, sc.vrw, sc.parentMakeChunk, sc.parentMakeChunk, metaHashValueBytes)
 	sc.parent.isLeaf = false
 
 	if sc.unwrittenCol != nil {
@@ -261,7 +301,7 @@ func (sc *sequenceChunker) Done() sequence {
 
 	// (3) This is an internal node of the tree which contains a single reference to a child node. This can occur if a non-leaf chunker happens to chunk on the first item (metaTuple) appended. In this case, this is the root of the tree, but it is *not* canonical and we must walk down until we find cases (1) or (2), above.
 	d.PanicIfFalse(!sc.isLeaf && len(sc.current) == 1)
-	mt := sc.current[0].(metaTuple)
+	mt := sc.current[0].item.(metaTuple)
 
 	for {
 		child := mt.getChildSequence(sc.vrw)
@@ -273,10 +313,10 @@ func (sc *sequenceChunker) Done() sequence {
 	}
 }
 
-// If we are mutating an existing sequence, appending subsequent items in the sequence until we reach a pre-existing chunk boundary or the end of the sequence.
+// If we are mutating an existing sequence, append subsequent items in the sequence until we reach a pre-existing chunk boundary or the end of the sequence.
 func (sc *sequenceChunker) finalizeCursor() {
 	for ; sc.cur.valid(); sc.cur.advance() {
-		if sc.Append(sc.cur.current()) && sc.cur.atLastItem() {
+		if sc.appendEntry(sc.cur.currentEntry()) && sc.cur.atLastItem() {
 			break // boundary occurred at same place in old & new sequence
 		}
 	}

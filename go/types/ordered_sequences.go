@@ -88,13 +88,13 @@ func getMapValue(cur *sequenceCursor) Value {
 // If |vw| is not nil, chunks will be eagerly written as they're created. Otherwise they are
 // written when the root is written.
 func newOrderedMetaSequenceChunkFn(kind NomsKind, vrw ValueReadWriter) makeChunkFn {
-	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
+	return func(level uint64, items []sequenceEntry) (Collection, orderedKey, uint64) {
 		tuples := make([]metaTuple, len(items))
 		numLeaves := uint64(0)
 
 		var lastKey orderedKey
 		for i, v := range items {
-			mt := v.(metaTuple)
+			mt := v.item.(metaTuple)
 			key := mt.key()
 			d.PanicIfFalse(lastKey == emptyKey || lastKey.Less(key))
 			lastKey = key

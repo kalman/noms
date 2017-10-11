@@ -191,13 +191,13 @@ func buildSetData(values ValueSlice) ValueSlice {
 }
 
 func makeSetLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
-	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
+	return func(level uint64, items []sequenceEntry) (Collection, orderedKey, uint64) {
 		d.PanicIfFalse(level == 0)
 		setData := make([]Value, len(items), len(items))
 
 		var lastValue Value
 		for i, item := range items {
-			v := item.(Value)
+			v := item.item.(Value)
 			d.PanicIfFalse(lastValue == nil || lastValue.Less(v))
 			lastValue = v
 			setData[i] = v
@@ -214,5 +214,5 @@ func makeSetLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
 }
 
 func newEmptySetSequenceChunker(vrw ValueReadWriter) *sequenceChunker {
-	return newEmptySequenceChunker(vrw, makeSetLeafChunkFn(vrw), newOrderedMetaSequenceChunkFn(SetKind, vrw), hashValueBytes)
+	return newEmptySequenceChunker(SetKind, vrw, makeSetLeafChunkFn(vrw), newOrderedMetaSequenceChunkFn(SetKind, vrw), hashValueBytes)
 }

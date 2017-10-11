@@ -278,13 +278,13 @@ func buildMapData(values []Value) mapEntrySlice {
 }
 
 func makeMapLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
-	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
+	return func(level uint64, items []sequenceEntry) (Collection, orderedKey, uint64) {
 		d.PanicIfFalse(level == 0)
 		mapData := make([]mapEntry, len(items), len(items))
 
 		var lastKey Value
 		for i, v := range items {
-			entry := v.(mapEntry)
+			entry := v.item.(mapEntry)
 			d.PanicIfFalse(lastKey == nil || lastKey.Less(entry.key))
 			lastKey = entry.key
 			mapData[i] = entry
@@ -300,5 +300,5 @@ func makeMapLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
 }
 
 func newEmptyMapSequenceChunker(vrw ValueReadWriter) *sequenceChunker {
-	return newEmptySequenceChunker(vrw, makeMapLeafChunkFn(vrw), newOrderedMetaSequenceChunkFn(MapKind, vrw), mapHashValueBytes)
+	return newEmptySequenceChunker(MapKind, vrw, makeMapLeafChunkFn(vrw), newOrderedMetaSequenceChunkFn(MapKind, vrw), mapHashValueBytes)
 }

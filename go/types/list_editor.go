@@ -89,7 +89,7 @@ func (le *ListEditor) List() List {
 		sp := <-<-spliceChan
 
 		if ch == nil {
-			ch = newSequenceChunker(cur, 0, vrw, makeListLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(ListKind, vrw), hashValueBytes)
+			ch = newSequenceChunker(ListKind, cur, 0, vrw, makeListLeafChunkFn(vrw), newIndexedMetaSequenceChunkFn(ListKind, vrw), hashValueBytes)
 		} else {
 			ch.advanceTo(cur)
 		}
