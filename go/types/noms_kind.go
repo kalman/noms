@@ -26,22 +26,24 @@ const (
 
 	TypeKind
 	UnionKind
+	RepeatKind
 )
 
-var KindToString = map[NomsKind]string{
-	BlobKind:   "Blob",
+var KindToString = []string{
 	BoolKind:   "Bool",
-	CycleKind:  "Cycle",
+	NumberKind: "Number",
+	StringKind: "String",
+	BlobKind:   "Blob",
+	ValueKind:  "Value",
 	ListKind:   "List",
 	MapKind:    "Map",
-	NumberKind: "Number",
 	RefKind:    "Ref",
 	SetKind:    "Set",
 	StructKind: "Struct",
-	StringKind: "String",
+	CycleKind:  "Cycle",
 	TypeKind:   "Type",
 	UnionKind:  "Union",
-	ValueKind:  "Value",
+	RepeatKind: "Repeat",
 }
 
 // String returns the name of the kind.

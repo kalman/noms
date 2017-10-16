@@ -254,10 +254,30 @@ func (l List) newChunker(cur *sequenceCursor, vrw ValueReadWriter) *sequenceChun
 func makeListLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
 	return func(level uint64, items []sequenceItem) (Collection, orderedKey, uint64) {
 		d.PanicIfFalse(level == 0)
-		values := make([]Value, len(items))
 
-		for i, v := range items {
-			values[i] = v.(Value)
+		uniqueValues := uint64(0)
+		for i, item := range items {
+			if i == 0 || !items[i-1].(Value).Equals(item.(Value)) {
+				uniqueValues++
+			}
+		}
+
+		values := make([]Value, 0, uniqueValues)
+
+		var last Value
+		for _, item := range items {
+			v := item.(Value)
+			if last == nil || !v.Equals(last) {
+				// Not a repeat.
+				values = append(values, v)
+			} else if r, ok := values[len(values)-1].(Repeat); ok {
+				// Repeat, and already in a repeat sequence.
+				r.count++
+			} else {
+				// Repeat, and a new repeat sequence.
+				values[len(values)-1] = newRepeat(vrw, 2, v)
+			}
+			last = v
 		}
 
 		list := newList(newListLeafSequence(vrw, values...))
