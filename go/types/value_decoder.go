@@ -381,6 +381,8 @@ func (r *typedBinaryNomsReader) readTypeInner(seenStructs map[string]*Type) *Typ
 		return makeCompoundType(RefKind, r.readTypeInner(seenStructs))
 	case SetKind:
 		return makeCompoundType(SetKind, r.readTypeInner(seenStructs))
+	case RepeatKind:
+		return makeCompoundType(RepeatKind, r.readTypeInner(seenStructs))
 	case StructKind:
 		return r.readStructType(seenStructs)
 	case UnionKind:
@@ -400,7 +402,7 @@ func (r *typedBinaryNomsReader) readTypeInner(seenStructs map[string]*Type) *Typ
 func (r *typedBinaryNomsReader) skipTypeInner() {
 	k := r.readKind()
 	switch k {
-	case ListKind, RefKind, SetKind:
+	case ListKind, RefKind, SetKind, RepeatKind:
 		r.skipTypeInner()
 	case MapKind:
 		r.skipTypeInner()

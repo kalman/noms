@@ -197,7 +197,14 @@ func iterRange(col Collection, startIdx, endIdx uint64, cb func(v Value)) (numBy
 		numValues += len(values)
 
 		for _, v := range values {
-			cb(v)
+			// TODO: UGH HOW MANY PLACES DO I NEED TO UPDATE THIS... HOW CAN THIS BE BETTER?
+			if r, ok := v.(Repeat); ok {
+				for i := uint64(0); i < r.count; i++ {
+					cb(r.v)
+				}
+			} else {
+				cb(v)
+			}
 		}
 
 		endIdx = endIdx - uint64(len(values))/valuesPerIdx - startIdx
