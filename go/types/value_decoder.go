@@ -233,6 +233,8 @@ func (r *valueDecoder) readValue() Value {
 	case TypeKind:
 		r.skipKind()
 		return r.readType()
+	case RepeatKind:
+		return r.readRepeat()
 	case CycleKind, UnionKind, ValueKind:
 		d.Panic("A value instance can never have type %s", k)
 	}
@@ -267,6 +269,8 @@ func (r *valueDecoder) skipValue() {
 	case TypeKind:
 		r.skipKind()
 		r.skipType()
+	case RepeatKind:
+		r.skipRepeat()
 	case CycleKind, UnionKind, ValueKind:
 		d.Panic("A value instance can never have type %s", k)
 	default:
@@ -294,8 +298,9 @@ func (r *valueDecoder) readTypeOfValue() *Type {
 		r.skipKind()
 		r.skipString()
 		return StringType
-	case ListKind, MapKind, RefKind, SetKind:
+	case ListKind, MapKind, RefKind, SetKind, RepeatKind:
 		// These do not decode the actual values anyway.
+		// TODO: True for RepeatKind?
 		return r.readValue().typeOf()
 	case StructKind:
 		return readStructTypeOfValue(r)
@@ -339,6 +344,14 @@ func (r *valueDecoder) readOrderedKey() orderedKey {
 		return orderedKeyFromHash(r.TargetHash())
 	}
 	return newOrderedKey(v)
+}
+
+func (r *valueDecoder) readRepeat() Value {
+	return readRepeat(r)
+}
+
+func (r *valueDecoder) skipRepeat() {
+	skipRepeat(r)
 }
 
 func (r *typedBinaryNomsReader) readType() *Type {

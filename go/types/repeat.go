@@ -14,18 +14,19 @@ type Repeat struct {
 }
 
 const (
-	repeatPartKind  = 0
-	repeatPartCount = 2
-	repeatPartValue = 3
+	repeatPartKind = iota
+	repeatPartCount
+	repeatPartValue
+	repeatPartEnd
 )
 
 func newRepeat(vrw ValueReadWriter, count uint64, v Value) Repeat {
 	d.PanicIfTrue(vrw == nil)
-	d.PanicIfTrue(count < 2)
+	d.PanicIfTrue(count == 0)
 	d.PanicIfTrue(v.Kind() == RepeatKind)
 
 	w := newBinaryNomsWriter()
-	offsets := make([]uint32, refPartEnd)
+	offsets := make([]uint32, repeatPartEnd)
 	offsets[repeatPartKind] = w.offset
 	RepeatKind.writeTo(&w)
 	offsets[repeatPartCount] = w.offset
@@ -34,6 +35,28 @@ func newRepeat(vrw ValueReadWriter, count uint64, v Value) Repeat {
 	v.writeTo(&w)
 
 	return Repeat{valueImpl{vrw, w.data(), offsets}, count, v}
+}
+
+func readRepeat(r *valueDecoder) Repeat {
+	start := r.pos()
+
+	offsets := make([]uint32, repeatPartEnd)
+	offsets[repeatPartKind] = r.pos()
+	r.skipKind()
+	offsets[repeatPartCount] = r.pos()
+	count := r.readCount()
+	offsets[repeatPartValue] = r.pos()
+	v := r.readValue()
+
+	end := r.pos()
+	return Repeat{valueImpl{nil, r.byteSlice(start, end), offsets}, count, v}
+}
+
+func skipRepeat(r *valueDecoder) uint64 {
+	r.skipKind()
+	count := r.readCount()
+	r.skipValue()
+	return count
 }
 
 // Value interface

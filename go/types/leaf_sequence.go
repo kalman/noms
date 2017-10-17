@@ -138,8 +138,22 @@ func (seq leafSequence) getItem(idx int) sequenceItem {
 	return dec.readValue()
 }
 
-func (seq leafSequence) Len() uint64 {
-	return seq.numLeaves()
+func (seq leafSequence) Len() (l uint64) {
+	dec, count := seq.decoderSkipToValues()
+
+	if seq.Kind() == BlobKind {
+		return count // blob sequences don't have values as items.
+	}
+
+	for i := uint64(0); i < count; i++ {
+		if dec.peekKind() == RepeatKind {
+			l += skipRepeat(&dec)
+		} else {
+			l += 1
+			dec.skipValue()
+		}
+	}
+	return
 }
 
 func getValuesPerIdx(seq sequence) uint64 {

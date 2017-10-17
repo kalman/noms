@@ -129,6 +129,10 @@ func (r *refWalker) walkValue(cb RefCallback) {
 	case TypeKind:
 		r.skipKind()
 		r.skipType()
+	case RepeatKind:
+		r.skipKind()
+		r.skipCount()
+		r.walkValue(cb)
 	case CycleKind, UnionKind, ValueKind:
 		d.Panic("A value instance can never have type %s", k)
 	default:

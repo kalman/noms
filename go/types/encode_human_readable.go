@@ -195,7 +195,9 @@ func (w *hrsWriter) Write(v Value) {
 				w.newLine()
 			}
 			w.Write(v)
-			w.write(",")
+			if v.Kind() != RepeatKind {
+				w.write(",")
+			}
 			w.newLine()
 			return w.err != nil
 		})
@@ -245,6 +247,13 @@ func (w *hrsWriter) Write(v Value) {
 
 	case StructKind:
 		w.writeStruct(v.(Struct))
+
+	case RepeatKind:
+		r := v.(Repeat)
+		w.Write(r.v)
+		w.write(", // repeated ")
+		w.writeCount(r.count)
+		w.write(" times")
 
 	default:
 		panic("unreachable")
@@ -307,10 +316,16 @@ func (w *hrsWriter) writeSize(v Value) {
 		if l < 4 {
 			return
 		}
-		w.write(fmt.Sprintf("  // %s items", humanize.Comma(int64(l))))
+		w.write("  // ")
+		w.writeCount(l)
+		w.write(" items")
 	default:
 		panic("unreachable")
 	}
+}
+
+func (w *hrsWriter) writeCount(l uint64) {
+	w.write(humanize.Comma(int64(l)))
 }
 
 func (w *hrsWriter) writeType(t *Type, seenStructs map[*Type]struct{}) {

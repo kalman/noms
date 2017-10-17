@@ -82,7 +82,7 @@ func TestWriteHumanReadableCollections(t *testing.T) {
 		nums[i] = Number(0)
 	}
 	l4 := NewList(vrw, nums...)
-	assertWriteHRSEqual(t, "[  // 2,000 items\n"+strings.Repeat("  0,\n", 2000)+"]", l4)
+	assertWriteHRSEqual(t, "[  // 2,000 items\n  0, // repeated 2,000 times\n]", l4)
 }
 
 func TestWriteHumanReadableNested(t *testing.T) {

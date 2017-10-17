@@ -263,25 +263,29 @@ func makeListLeafChunkFn(vrw ValueReadWriter) makeChunkFn {
 		}
 
 		values := make([]Value, 0, uniqueValues)
+		last := Value(nil)
+		repeats := uint64(0)
 
-		var last Value
 		for _, item := range items {
 			v := item.(Value)
 			if last == nil || !v.Equals(last) {
-				// Not a repeat.
+				if repeats > 0 {
+					values[len(values)-1] = newRepeat(vrw, repeats+1, last)
+					repeats = 0
+				}
 				values = append(values, v)
-			} else if r, ok := values[len(values)-1].(Repeat); ok {
-				// Repeat, and already in a repeat sequence.
-				r.count++
 			} else {
-				// Repeat, and a new repeat sequence.
-				values[len(values)-1] = newRepeat(vrw, 2, v)
+				repeats++
 			}
 			last = v
 		}
 
+		if repeats > 0 {
+			values[len(values)-1] = newRepeat(vrw, repeats+1, last)
+		}
+
 		list := newList(newListLeafSequence(vrw, values...))
-		return list, orderedKeyFromInt(len(values)), uint64(len(values))
+		return list, orderedKeyFromInt(len(items)), uint64(len(items))
 	}
 }
 
